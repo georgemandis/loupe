@@ -133,8 +133,7 @@ pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
         } else if (std.mem.endsWith(u8, path, ".jpg") or std.mem.endsWith(u8, path, ".jpeg")) {
             break :blk "public.jpeg";
         } else {
-            // Default to PNG for unknown extensions
-            break :blk "public.png";
+            return vision.VisionError.UnsupportedFormat;
         }
     };
 
