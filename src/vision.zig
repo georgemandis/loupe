@@ -73,8 +73,8 @@ pub const VisionError = error{
 // Platform dispatch functions
 // ---------------------------------------------------------------------------
 
-pub fn loadImage(allocator: Allocator, path: []const u8) VisionError!ImageHandle {
-    return platform.loadImage(allocator, path);
+pub fn loadImage(path: []const u8) VisionError!ImageHandle {
+    return platform.loadImage(path);
 }
 
 pub fn detectFaces(allocator: Allocator, image: ImageHandle) VisionError![]FaceResult {
@@ -93,14 +93,21 @@ pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const FaceRe
     return platform.blurFaces(allocator, image, faces, mode);
 }
 
-pub fn saveImage(allocator: Allocator, image: ImageHandle, path: []const u8) VisionError!void {
-    return platform.saveImage(allocator, image, path);
+pub fn saveImage(image: ImageHandle, path: []const u8) VisionError!void {
+    return platform.saveImage(image, path);
 }
 
 pub fn freeImage(image: ImageHandle) void {
     platform.freeImage(image);
 }
 
-pub fn freeResults(allocator: Allocator, results: anytype) void {
-    platform.freeResults(allocator, results);
+pub fn freeResults(allocator: Allocator, comptime T: type, results: []T) void {
+    for (results) |*r| {
+        switch (T) {
+            OcrResult => allocator.free(r.text),
+            BarcodeResult => allocator.free(r.payload),
+            else => {},
+        }
+    }
+    allocator.free(results);
 }

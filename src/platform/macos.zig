@@ -7,8 +7,7 @@ const vision = @import("../vision.zig");
 
 pub const ImageHandle = *anyopaque;
 
-pub fn loadImage(allocator: Allocator, path: []const u8) vision.VisionError!ImageHandle {
-    _ = allocator;
+pub fn loadImage(path: []const u8) vision.VisionError!ImageHandle {
     _ = path;
     return vision.VisionError.UnsupportedPlatform;
 }
@@ -39,8 +38,7 @@ pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const vision
     return vision.VisionError.UnsupportedPlatform;
 }
 
-pub fn saveImage(allocator: Allocator, image: ImageHandle, path: []const u8) vision.VisionError!void {
-    _ = allocator;
+pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
     _ = image;
     _ = path;
     return vision.VisionError.UnsupportedPlatform;
@@ -51,8 +49,4 @@ pub fn freeImage(image: ImageHandle) void {
     // no-op in stub
 }
 
-pub fn freeResults(allocator: Allocator, results: anytype) void {
-    _ = allocator;
-    _ = results;
-    // no-op in stub
-}
+// freeResults is now handled in vision.zig directly — no platform dispatch needed.
