@@ -73,9 +73,8 @@ pub fn main() !void {
     }
 
     if (std.mem.eql(u8, subcommand, "ocr")) {
-        try stderr.interface.print("Error: 'ocr' subcommand is not yet implemented.\n", .{});
-        try stderr.interface.flush();
-        std.process.exit(1);
+        runOcr(allocator, args[2..], &stdout.interface, &stderr.interface);
+        return;
     }
 
     if (std.mem.eql(u8, subcommand, "barcode")) {
@@ -227,6 +226,117 @@ fn printFacesJson(writer: *std.io.Writer, faces: []const vision.FaceResult) void
         }) catch {};
     }
     writer.print("]}}\n", .{}) catch {};
+}
+
+// ---------------------------------------------------------------------------
+// ocr subcommand
+// ---------------------------------------------------------------------------
+
+fn runOcr(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+
+    var i: usize = 0;
+    while (i < sub_args.len) : (i += 1) {
+        const arg = sub_args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\nUsage: loupe ocr [--json] <image>\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    const handle = vision.loadImage(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const results = vision.recognizeText(allocator, handle) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeResults(allocator, vision.OcrResult, results);
+
+    if (json_mode) {
+        printOcrJson(stdout_writer, results);
+    } else {
+        printOcrHuman(stdout_writer, results);
+    }
+    stdout_writer.flush() catch {};
+
+    std.process.exit(0);
+}
+
+fn printOcrHuman(writer: *std.io.Writer, results: []const vision.OcrResult) void {
+    if (results.len == 0) {
+        writer.print("No text detected.\n", .{}) catch {};
+        return;
+    }
+    for (results) |r| {
+        writer.print("{s}\n", .{r.text}) catch {};
+    }
+}
+
+fn printOcrJson(writer: *std.io.Writer, results: []const vision.OcrResult) void {
+    // Build combined text (all regions joined with newline)
+    writer.print("{{\"text\":", .{}) catch {};
+    if (results.len == 0) {
+        writer.print("\"\"", .{}) catch {};
+    } else {
+        writer.print("\"", .{}) catch {};
+        for (results, 0..) |r, idx| {
+            if (idx > 0) writer.print("\\n", .{}) catch {};
+            writeJsonString(writer, r.text);
+        }
+        writer.print("\"", .{}) catch {};
+    }
+
+    writer.print(",\"regions\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"text\":", .{}) catch {};
+        writer.print("\"", .{}) catch {};
+        writeJsonString(writer, r.text);
+        writer.print("\"", .{}) catch {};
+        writer.print(",\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4},\"confidence\":{d:.4}}}", .{
+            r.box.x,
+            r.box.y,
+            r.box.width,
+            r.box.height,
+            r.confidence,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+/// Write a JSON-escaped string value (without surrounding quotes).
+fn writeJsonString(writer: *std.io.Writer, s: []const u8) void {
+    for (s) |c| {
+        switch (c) {
+            '"' => writer.print("\\\"", .{}) catch {},
+            '\\' => writer.print("\\\\", .{}) catch {},
+            '\n' => writer.print("\\n", .{}) catch {},
+            '\r' => writer.print("\\r", .{}) catch {},
+            '\t' => writer.print("\\t", .{}) catch {},
+            else => writer.print("{c}", .{c}) catch {},
+        }
+    }
 }
 
 fn handleError(

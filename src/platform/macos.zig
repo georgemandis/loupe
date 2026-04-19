@@ -253,9 +253,107 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
 }
 
 pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
-    _ = allocator;
-    _ = image;
-    return vision.VisionError.UnsupportedPlatform;
+    // 1. Create empty NSDictionary for options
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    // 2. Create VNImageRequestHandler from CGImage
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+
+    // 3. Create VNRecognizeTextRequest
+    const RequestClass = objc.getClass("VNRecognizeTextRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+
+    // 4. Set recognition level to accurate (1)
+    const set_level_fn: *const fn (objc.id, objc.SEL, i64) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_level_fn(request, objc.sel("setRecognitionLevel:"), @as(i64, 1));
+
+    // 5. Wrap request in NSArray and perform
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    // 6. Get results — NSArray of VNRecognizedTextObservation
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) {
+        objc.msgSend(void, handler, objc.sel("release"), .{});
+        objc.msgSend(void, request, objc.sel("release"), .{});
+        return allocator.alloc(vision.OcrResult, 0) catch return vision.VisionError.OutOfMemory;
+    }
+
+    // Allocate output slice (may shrink if some observations have no candidates)
+    const ocr_results = allocator.alloc(vision.OcrResult, count) catch return vision.VisionError.OutOfMemory;
+    var actual_count: usize = 0;
+
+    // 7. Iterate observations
+    for (0..count) |i| {
+        const observation = objc.nsArrayObjectAtIndex(results, i);
+
+        // Get top candidate: [observation topCandidates:1]
+        const top_candidates_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id = @ptrCast(&objc_msgSend);
+        const candidates = top_candidates_fn(observation, objc.sel("topCandidates:"), @as(objc.NSUInteger, 1));
+        const cand_count = objc.nsArrayCount(candidates);
+        if (cand_count == 0) continue;
+
+        const candidate = objc.nsArrayObjectAtIndex(candidates, 0);
+
+        // Get text string from candidate
+        const ns_str = objc.msgSend(objc.id, candidate, objc.sel("string"), .{});
+        const c_str = objc.fromNSString(ns_str) orelse continue;
+        const text_len = std.mem.len(c_str);
+
+        // Copy text into heap-allocated Zig slice
+        const text_copy = allocator.alloc(u8, text_len) catch {
+            // Free any already-allocated text entries and the slice
+            for (0..actual_count) |j| allocator.free(ocr_results[j].text);
+            allocator.free(ocr_results);
+            objc.msgSend(void, handler, objc.sel("release"), .{});
+            objc.msgSend(void, request, objc.sel("release"), .{});
+            return vision.VisionError.OutOfMemory;
+        };
+        @memcpy(text_copy, c_str[0..text_len]);
+
+        // Get confidence
+        const confidence = objc.msgSend(f32, candidate, objc.sel("confidence"), .{});
+
+        // Get bounding box from observation and flip Y coordinate
+        const bbox = getBoundingBox(observation);
+        const y_flipped = 1.0 - bbox.origin_y - bbox.size_height;
+
+        ocr_results[actual_count] = .{
+            .text = text_copy,
+            .box = .{
+                .x = bbox.origin_x,
+                .y = y_flipped,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+            .confidence = @floatCast(confidence),
+        };
+        actual_count += 1;
+    }
+
+    // Release alloc+init objects
+    objc.msgSend(void, handler, objc.sel("release"), .{});
+    objc.msgSend(void, request, objc.sel("release"), .{});
+
+    // Return a trimmed slice if some observations were skipped
+    if (actual_count < count) {
+        const trimmed = allocator.realloc(ocr_results, actual_count) catch ocr_results[0..actual_count];
+        return trimmed;
+    }
+
+    return ocr_results;
 }
 
 pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.BarcodeResult {
