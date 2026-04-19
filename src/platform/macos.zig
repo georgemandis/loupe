@@ -234,6 +234,10 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
         };
     }
 
+    // Release alloc+init objects (handler and request own +1 retain count)
+    objc.msgSend(void, handler, objc.sel("release"), .{});
+    objc.msgSend(void, request, objc.sel("release"), .{});
+
     return faces;
 }
 
