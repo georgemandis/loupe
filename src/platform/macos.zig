@@ -4,6 +4,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const vision = @import("../vision.zig");
+const objc = @import("../objc.zig");
 
 // ---------------------------------------------------------------------------
 // CoreFoundation / ImageIO / CoreGraphics extern declarations
@@ -157,10 +158,83 @@ pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
 // Stubs for later tasks
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Vision framework helpers for face detection
+// ---------------------------------------------------------------------------
+
+const CGRect = extern struct {
+    origin_x: f64,
+    origin_y: f64,
+    size_width: f64,
+    size_height: f64,
+};
+
+// We need a typed cast of objc_msgSend that returns CGRect (32 bytes, fits in
+// 4 ARM64 registers so regular objc_msgSend works — no _stret needed).
+extern "objc" fn objc_msgSend() void;
+
+fn getBoundingBox(observation: objc.id) CGRect {
+    const func: *const fn (objc.id, objc.SEL) callconv(.c) CGRect = @ptrCast(&objc_msgSend);
+    return func(observation, objc.sel("boundingBox"));
+}
+
 pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.FaceResult {
-    _ = allocator;
-    _ = image;
-    return vision.VisionError.UnsupportedPlatform;
+    // 1. Create empty NSDictionary for options
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    // 2. Create VNImageRequestHandler from CGImage
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+
+    // 3. Create VNDetectFaceRectanglesRequest
+    const RequestClass = objc.getClass("VNDetectFaceRectanglesRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+
+    // 4. Wrap request in NSArray
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    // 5. Perform requests
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    // 6. Get results — NSArray of VNFaceObservation
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) {
+        return allocator.alloc(vision.FaceResult, 0) catch return vision.VisionError.OutOfMemory;
+    }
+
+    // 7. Allocate output slice and populate
+    const faces = allocator.alloc(vision.FaceResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const observation = objc.nsArrayObjectAtIndex(results, i);
+        const bbox = getBoundingBox(observation);
+        const confidence = objc.msgSend(f32, observation, objc.sel("confidence"), .{});
+
+        // Vision uses bottom-left origin; flip to top-left
+        const y_flipped = 1.0 - bbox.origin_y - bbox.size_height;
+
+        faces[i] = .{
+            .box = .{
+                .x = bbox.origin_x,
+                .y = y_flipped,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+            .confidence = @floatCast(confidence),
+        };
+    }
+
+    return faces;
 }
 
 pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
