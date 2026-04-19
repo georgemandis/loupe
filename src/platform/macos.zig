@@ -43,6 +43,16 @@ extern "c" fn CGImageRelease(image: *anyopaque) void;
 extern "c" fn CGImageGetWidth(image: *anyopaque) usize;
 extern "c" fn CGImageGetHeight(image: *anyopaque) usize;
 
+extern "c" fn CGBitmapContextCreate(data: ?*anyopaque, width: usize, height: usize, bitsPerComponent: usize, bytesPerRow: usize, space: *anyopaque, bitmapInfo: u32) ?*anyopaque;
+extern "c" fn CGBitmapContextCreateImage(context: *anyopaque) ?*anyopaque;
+extern "c" fn CGContextDrawImage(context: *anyopaque, rect: CGRect, image: *anyopaque) void;
+extern "c" fn CGContextSetRGBFillColor(context: *anyopaque, r: f64, g: f64, b: f64, a: f64) void;
+extern "c" fn CGContextFillRect(context: *anyopaque, rect: CGRect) void;
+extern "c" fn CGContextRelease(context: *anyopaque) void;
+extern "c" fn CGColorSpaceCreateDeviceRGB() ?*anyopaque;
+extern "c" fn CGColorSpaceRelease(space: *anyopaque) void;
+extern "c" fn CGImageCreateWithImageInRect(image: *anyopaque, rect: CGRect) ?*anyopaque;
+
 extern "c" fn CGImageDestinationCreateWithURL(
     url: *anyopaque,
     image_type: *anyopaque,
@@ -64,6 +74,7 @@ extern "c" fn CGImageDestinationFinalize(dest: *anyopaque) bool;
 
 const kCFStringEncodingUTF8: u32 = 0x08000100;
 const kCFURLPOSIXPathStyle: i64 = 0;
+const kCGImageAlphaPremultipliedLast: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -253,12 +264,135 @@ pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError
     return vision.VisionError.UnsupportedPlatform;
 }
 
+// ---------------------------------------------------------------------------
+// Blur/Redact helpers
+// ---------------------------------------------------------------------------
+
+/// Helper: convert normalized top-left face coords to CG bottom-left pixel CGRect.
+fn faceRectToPixels(face: vision.FaceResult, width_f: f64, height_f: f64) CGRect {
+    const px = face.box.x * width_f;
+    const pw = face.box.width * width_f;
+    const ph = face.box.height * height_f;
+    const py = (1.0 - face.box.y - face.box.height) * height_f; // flip to bottom-left
+    return .{ .origin_x = px, .origin_y = py, .size_width = pw, .size_height = ph };
+}
+
+/// Typed objc_msgSend for CIContext createCGImage:fromRect: (needs CGRect arg).
+fn ciContextCreateCGImage(ctx: objc.id, ci_image: objc.id, rect: CGRect) ?*anyopaque {
+    const func: *const fn (objc.id, objc.SEL, objc.id, CGRect) callconv(.c) ?*anyopaque = @ptrCast(&objc_msgSend);
+    return func(ctx, objc.sel("createCGImage:fromRect:"), ci_image, rect);
+}
+
+/// Typed objc_msgSend for CIImage extent (returns CGRect).
+fn getCIImageExtent(ci_image: objc.id) CGRect {
+    const func: *const fn (objc.id, objc.SEL) callconv(.c) CGRect = @ptrCast(&objc_msgSend);
+    return func(ci_image, objc.sel("extent"));
+}
+
+/// Create a bitmap context with the original image drawn into it.
+fn createBitmapContextWithImage(image: ImageHandle, width: usize, height: usize) vision.VisionError!struct { ctx: *anyopaque, color_space: *anyopaque } {
+    const color_space = CGColorSpaceCreateDeviceRGB() orelse return vision.VisionError.DetectionFailed;
+    errdefer CGColorSpaceRelease(color_space);
+
+    const ctx = CGBitmapContextCreate(
+        null,
+        width,
+        height,
+        8,
+        width * 4,
+        color_space,
+        kCGImageAlphaPremultipliedLast,
+    ) orelse {
+        CGColorSpaceRelease(color_space);
+        return vision.VisionError.DetectionFailed;
+    };
+
+    const width_f: f64 = @floatFromInt(width);
+    const height_f: f64 = @floatFromInt(height);
+    const full_rect = CGRect{ .origin_x = 0, .origin_y = 0, .size_width = width_f, .size_height = height_f };
+    CGContextDrawImage(ctx, full_rect, image);
+
+    return .{ .ctx = ctx, .color_space = color_space };
+}
+
 pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const vision.FaceResult, mode: vision.BlurMode) vision.VisionError!ImageHandle {
     _ = allocator;
-    _ = image;
-    _ = faces;
-    _ = mode;
-    return vision.VisionError.UnsupportedPlatform;
+
+    const width = CGImageGetWidth(image);
+    const height = CGImageGetHeight(image);
+    const width_f: f64 = @floatFromInt(width);
+    const height_f: f64 = @floatFromInt(height);
+
+    const bmp = try createBitmapContextWithImage(image, width, height);
+    const ctx = bmp.ctx;
+    const color_space = bmp.color_space;
+    defer CGContextRelease(ctx);
+    defer CGColorSpaceRelease(color_space);
+
+    switch (mode) {
+        .redact => {
+            // Draw black rectangles over each face
+            CGContextSetRGBFillColor(ctx, 0, 0, 0, 1);
+            for (faces) |face| {
+                const face_rect = faceRectToPixels(face, width_f, height_f);
+                CGContextFillRect(ctx, face_rect);
+            }
+        },
+        .blur => {
+            // For each face: crop, blur with CIGaussianBlur, draw back
+            const CIImage = objc.getClass("CIImage") orelse return vision.VisionError.DetectionFailed;
+            const CIFilter = objc.getClass("CIFilter") orelse return vision.VisionError.DetectionFailed;
+            const CIContext = objc.getClass("CIContext") orelse return vision.VisionError.DetectionFailed;
+            const NSNumber = objc.getClass("NSNumber") orelse return vision.VisionError.DetectionFailed;
+
+            // Create a shared CIContext for rendering
+            const ci_ctx = objc.msgSend(objc.id, CIContext, objc.sel("context"), .{});
+
+            for (faces) |face| {
+                const face_rect = faceRectToPixels(face, width_f, height_f);
+
+                // 1. Crop face from original CGImage
+                const cropped = CGImageCreateWithImageInRect(image, face_rect) orelse continue;
+                defer CGImageRelease(cropped);
+
+                // 2. Create CIImage from cropped CGImage
+                const cropped_as_id: objc.id = @ptrCast(cropped);
+                const ci_image = objc.msgSend(objc.id, CIImage, objc.sel("imageWithCGImage:"), .{cropped_as_id});
+
+                // 3. Create CIGaussianBlur filter
+                const filter_name = objc.nsString("CIGaussianBlur");
+                const filter = objc.msgSend(objc.id, CIFilter, objc.sel("filterWithName:"), .{filter_name});
+
+                // 4. Set defaults
+                objc.msgSend(void, filter, objc.sel("setDefaults"), .{});
+
+                // 5. Set input image
+                const input_image_key = objc.nsString("inputImage");
+                objc.msgSend(void, filter, objc.sel("setValue:forKey:"), .{ ci_image, input_image_key });
+
+                // 6. Set blur radius
+                const input_radius_key = objc.nsString("inputRadius");
+                const radius_value = objc.msgSend(objc.id, NSNumber, objc.sel("numberWithFloat:"), .{@as(f32, 20.0)});
+                objc.msgSend(void, filter, objc.sel("setValue:forKey:"), .{ radius_value, input_radius_key });
+
+                // 7. Get output CIImage
+                const output_ci = objc.msgSend(objc.id, filter, objc.sel("outputImage"), .{});
+
+                // 8. Render to CGImage using the INPUT image's extent (not output's,
+                //    since blur expands the bounds)
+                const input_extent = getCIImageExtent(ci_image);
+                const blurred_cg = ciContextCreateCGImage(ci_ctx, output_ci, input_extent) orelse continue;
+                defer CGImageRelease(blurred_cg);
+
+                // 9. Draw blurred face back into bitmap context at face position
+                CGContextDrawImage(ctx, face_rect, blurred_cg);
+            }
+        },
+    }
+
+    // Create result image from bitmap context
+    const result = CGBitmapContextCreateImage(ctx) orelse return vision.VisionError.DetectionFailed;
+    return result;
 }
 
 // freeResults is handled in vision.zig directly — no platform dispatch needed.
