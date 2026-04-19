@@ -347,10 +347,9 @@ pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionErro
     objc.msgSend(void, handler, objc.sel("release"), .{});
     objc.msgSend(void, request, objc.sel("release"), .{});
 
-    // Return a trimmed slice if some observations were skipped
+    // Shrink to actual size if some observations were skipped
     if (actual_count < count) {
-        const trimmed = allocator.realloc(ocr_results, actual_count) catch ocr_results[0..actual_count];
-        return trimmed;
+        return allocator.realloc(ocr_results, actual_count) catch return vision.VisionError.OutOfMemory;
     }
 
     return ocr_results;

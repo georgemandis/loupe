@@ -334,6 +334,7 @@ fn writeJsonString(writer: *std.io.Writer, s: []const u8) void {
             '\n' => writer.print("\\n", .{}) catch {},
             '\r' => writer.print("\\r", .{}) catch {},
             '\t' => writer.print("\\t", .{}) catch {},
+            0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => writer.print("\\u{X:0>4}", .{c}) catch {},
             else => writer.print("{c}", .{c}) catch {},
         }
     }
