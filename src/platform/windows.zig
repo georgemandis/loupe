@@ -9,30 +9,32 @@ const vision = @import("../vision.zig");
 // WinRT / COM base types
 // ---------------------------------------------------------------------------
 
-pub const GUID = extern struct {
-    Data1: u32,
-    Data2: u16,
-    Data3: u16,
-    Data4: [8]u8,
+const GUID = extern struct {
+    data1: u32,
+    data2: u16,
+    data3: u16,
+    data4: [8]u8,
 };
 
-pub const HRESULT = i32;
-pub const HSTRING = *anyopaque;
-pub const S_OK: HRESULT = 0;
-pub const RO_INIT_MULTITHREADED: u32 = 1;
+const HRESULT = i32;
+const HSTRING = ?*anyopaque;
 
-pub const AsyncStatus = enum(u32) {
+const S_OK: HRESULT = 0;
+const RO_INIT_MULTITHREADED: u32 = 1;
+
+const AsyncStatus = enum(i32) {
     Started = 0,
     Completed = 1,
     Canceled = 2,
     Error = 3,
 };
 
-pub const BitmapBounds = extern struct {
-    X: u32,
-    Y: u32,
-    Width: u32,
-    Height: u32,
+// BitmapBounds — pixel coordinates, top-left origin (NOT normalized like macOS)
+const BitmapBounds = extern struct {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
 };
 
 pub const ImageHandle = *anyopaque;
@@ -41,67 +43,63 @@ pub const ImageHandle = *anyopaque;
 // IIDs — placeholders (zeros) unless noted
 // ---------------------------------------------------------------------------
 
-pub const IID_IAsyncInfo = GUID{
-    .Data1 = 0x00000036,
-    .Data2 = 0x0000,
-    .Data3 = 0x0000,
-    .Data4 = .{ 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 },
+const IID_IAsyncInfo = GUID{
+    .data1 = 0x00000036,
+    .data2 = 0x0000,
+    .data3 = 0x0000,
+    .data4 = .{ 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 },
 };
 
-pub const IID_IStorageFileStatics = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IStorageFile = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IBitmapDecoderStatics = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IBitmapDecoder = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IBitmapFrameWithSoftwareBitmap = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_ISoftwareBitmap = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+// TODO: Fill in from SDK headers during implementation
+const IID_IStorageFileStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IStorageFile = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IBitmapDecoderStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IBitmapDecoder = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IBitmapFrameWithSoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_ISoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 
-pub const IID_IFaceDetectorStatics = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IFaceDetector = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IDetectedFace = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IFaceDetectorStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IFaceDetector = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IDetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 
-pub const IID_IOcrEngineStatics = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IOcrEngine = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IOcrResult = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IOcrLine = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IOcrEngineStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IOcrEngine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IOcrResult = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IOcrLine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 
-// Parameterized IAsyncOperation / IVectorView IIDs
-pub const IID_IAsyncOp_StorageFile = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_IRandomAccessStream = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_BitmapDecoder = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_SoftwareBitmap = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_FaceDetector = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_OcrResult = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_VectorView_DetectedFace = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IAsyncOp_BitmapFrame = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IVectorView_DetectedFace = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-pub const IID_IVectorView_OcrLine = GUID{ .Data1 = 0, .Data2 = 0, .Data3 = 0, .Data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+// Parameterized type IIDs (IAsyncOperation<T>, IVectorView<T>)
+// These are SHA1 hashes — look for __FIAsyncOperation_1_xxx in the headers
+const IID_IAsyncOp_StorageFile = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_IRandomAccessStream = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_BitmapDecoder = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_SoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_FaceDetector = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_OcrResult = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_VectorView_DetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_BitmapFrame = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IVectorView_DetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IVectorView_OcrLine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 
 // ---------------------------------------------------------------------------
 // COM vtable structs
 // ---------------------------------------------------------------------------
 
-// IUnknown (3) + IInspectable (3) base methods
-pub const IInspectableVtbl = extern struct {
-    // IUnknown
+const IInspectableVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
 };
 
-pub const IAsyncInfoVtbl = extern struct {
-    // IUnknown
+const IAsyncInfoVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IAsyncInfo
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_Id: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
     get_Status: *const fn (*anyopaque, *AsyncStatus) callconv(.c) HRESULT,
     get_ErrorCode: *const fn (*anyopaque, *HRESULT) callconv(.c) HRESULT,
@@ -109,47 +107,41 @@ pub const IAsyncInfoVtbl = extern struct {
     Close: *const fn (*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IAsyncOperationVtbl = extern struct {
-    // IUnknown
+// Generic IAsyncOperation vtable — GetResults returns *anyopaque
+const IAsyncOperationVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IAsyncOperation<T>
-    put_Completed: *const fn (*anyopaque, *anyopaque) callconv(.c) HRESULT,
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
+    put_Completed: *const fn (*anyopaque, ?*anyopaque) callconv(.c) HRESULT,
     get_Completed: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     GetResults: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IVectorViewVtbl = extern struct {
-    // IUnknown
+// IVectorView<T> — generic read-only collection
+const IVectorViewVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IVectorView<T>
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     GetAt: *const fn (*anyopaque, u32, *?*anyopaque) callconv(.c) HRESULT,
     get_Size: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
     IndexOf: *const fn (*anyopaque, *anyopaque, *u32, *bool) callconv(.c) HRESULT,
     GetMany: *const fn (*anyopaque, u32, u32, *?*anyopaque, *u32) callconv(.c) HRESULT,
 };
 
-pub const IStorageFileStaticsVtbl = extern struct {
-    // IUnknown
+// IStorageFileStatics — GetFileFromPathAsync
+const IStorageFileStaticsVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IStorageFileStatics
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     GetFileFromPathAsync: *const fn (*anyopaque, HSTRING, *?*anyopaque) callconv(.c) HRESULT,
     GetFileFromApplicationUriAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     CreateStreamedFileAsync: *const fn (*anyopaque, HSTRING, *anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
@@ -158,39 +150,38 @@ pub const IStorageFileStaticsVtbl = extern struct {
     ReplaceWithStreamedFileFromUriAsync: *const fn (*anyopaque, *anyopaque, *anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IStorageFileVtbl = extern struct {
-    // IUnknown
+// IStorageFile — OpenAsync (needed to get IRandomAccessStream)
+// IStorageFile does NOT inherit IStorageItem in COM vtable — they are separate interfaces.
+// Verify method order from SDK header: windows.storage.h IStorageFile
+const IStorageFileVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IStorageFile
-    get_FileType: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    get_ContentType: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    OpenAsync: *const fn (*anyopaque, u32, *?*anyopaque) callconv(.c) HRESULT,
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
+    // IStorageFile methods — verify order from SDK header
+    get_FileType: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    get_ContentType: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    OpenAsync: *const fn (*anyopaque, i32, *?*anyopaque) callconv(.c) HRESULT,
     OpenTransactedWriteAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     CopyOverloadDefaultNameAndOptions: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     CopyOverloadDefaultOptions: *const fn (*anyopaque, *anyopaque, HSTRING, *?*anyopaque) callconv(.c) HRESULT,
-    CopyOverload: *const fn (*anyopaque, *anyopaque, HSTRING, u32, *?*anyopaque) callconv(.c) HRESULT,
+    CopyOverload: *const fn (*anyopaque, *anyopaque, HSTRING, i32, *?*anyopaque) callconv(.c) HRESULT,
     CopyAndReplaceAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     MoveOverloadDefaultNameAndOptions: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     MoveOverloadDefaultOptions: *const fn (*anyopaque, *anyopaque, HSTRING, *?*anyopaque) callconv(.c) HRESULT,
-    MoveOverload: *const fn (*anyopaque, *anyopaque, HSTRING, u32, *?*anyopaque) callconv(.c) HRESULT,
+    MoveOverload: *const fn (*anyopaque, *anyopaque, HSTRING, i32, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IBitmapDecoderStaticsVtbl = extern struct {
-    // IUnknown
+// IBitmapDecoderStatics — CreateAsync(stream)
+const IBitmapDecoderStaticsVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IBitmapDecoderStatics
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_BmpDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
     get_JpegDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
     get_PngDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
@@ -202,16 +193,15 @@ pub const IBitmapDecoderStaticsVtbl = extern struct {
     CreateWithIdAsync: *const fn (*anyopaque, GUID, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IBitmapDecoderVtbl = extern struct {
-    // IUnknown
+// IBitmapDecoder — GetSoftwareBitmapAsync
+const IBitmapDecoderVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IBitmapDecoder
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
+    // IBitmapDecoder methods — verify order from SDK header
     get_BitmapContainerProperties: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     get_DecoderInformation: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     get_FrameCount: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
@@ -219,20 +209,18 @@ pub const IBitmapDecoderVtbl = extern struct {
     GetFrameAsync: *const fn (*anyopaque, u32, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IBitmapFrameVtbl = extern struct {
-    // IUnknown
+// IBitmapFrame — get_PixelWidth, get_PixelHeight (BitmapDecoder inherits from this)
+const IBitmapFrameVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IBitmapFrame
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     GetThumbnailAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     get_BitmapProperties: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    get_BitmapPixelFormat: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    get_BitmapAlphaMode: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
+    get_BitmapPixelFormat: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
+    get_BitmapAlphaMode: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_DpiX: *const fn (*anyopaque, *f64) callconv(.c) HRESULT,
     get_DpiY: *const fn (*anyopaque, *f64) callconv(.c) HRESULT,
     get_PixelWidth: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
@@ -240,76 +228,66 @@ pub const IBitmapFrameVtbl = extern struct {
     get_OrientedPixelWidth: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
     get_OrientedPixelHeight: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
     GetPixelDataAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    GetPixelDataTransformedAsync: *const fn (*anyopaque, u32, u32, f64, u32, BitmapBounds, *?*anyopaque) callconv(.c) HRESULT,
+    GetPixelDataTransformedAsync: *const fn (*anyopaque, i32, i32, f64, i32, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IBitmapFrameWithSoftwareBitmapVtbl = extern struct {
-    // IUnknown
+// IBitmapFrameWithSoftwareBitmap — GetSoftwareBitmapAsync
+const IBitmapFrameWithSoftwareBitmapVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IBitmapFrameWithSoftwareBitmap
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     GetSoftwareBitmapAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    GetSoftwareBitmapConvertedAsync: *const fn (*anyopaque, u32, u32, *?*anyopaque) callconv(.c) HRESULT,
-    GetSoftwareBitmapTransformedAsync: *const fn (*anyopaque, u32, u32, u32, u32, *?*anyopaque) callconv(.c) HRESULT,
+    GetSoftwareBitmapConvertedAsync: *const fn (*anyopaque, i32, i32, *?*anyopaque) callconv(.c) HRESULT,
+    GetSoftwareBitmapTransformedAsync: *const fn (*anyopaque, i32, i32, *anyopaque, i32, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IFaceDetectorStaticsVtbl = extern struct {
-    // IUnknown
+// IFaceDetectorStatics — CreateAsync
+const IFaceDetectorStaticsVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IFaceDetectorStatics
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     CreateAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     GetSupportedBitmapPixelFormats: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    IsBitmapPixelFormatSupported: *const fn (*anyopaque, u32, *bool) callconv(.c) HRESULT,
+    IsBitmapPixelFormatSupported: *const fn (*anyopaque, i32, *bool) callconv(.c) HRESULT,
 };
 
-pub const IFaceDetectorVtbl = extern struct {
-    // IUnknown
+// IFaceDetector — DetectFacesAsync
+const IFaceDetectorVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IFaceDetector
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     DetectFacesAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     DetectFacesWithSearchAreaAsync: *const fn (*anyopaque, *anyopaque, BitmapBounds, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IDetectedFaceVtbl = extern struct {
-    // IUnknown
+// IDetectedFace — get_FaceBox
+const IDetectedFaceVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IDetectedFace
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_FaceBox: *const fn (*anyopaque, *BitmapBounds) callconv(.c) HRESULT,
 };
 
-pub const IOcrEngineStaticsVtbl = extern struct {
-    // IUnknown
+// IOcrEngineStatics — TryCreateFromUserProfileLanguages
+const IOcrEngineStaticsVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IOcrEngineStatics
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     MaxImageDimension: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
     AvailableRecognizerLanguages: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     IsLanguageSupported: *const fn (*anyopaque, *anyopaque, *bool) callconv(.c) HRESULT,
@@ -317,86 +295,93 @@ pub const IOcrEngineStaticsVtbl = extern struct {
     TryCreateFromUserProfileLanguages: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IOcrEngineVtbl = extern struct {
-    // IUnknown
+// IOcrEngine — RecognizeAsync
+const IOcrEngineVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IOcrEngine
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     RecognizeAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     RecognizerLanguage: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IOcrResultVtbl = extern struct {
-    // IUnknown
+// IOcrResult — get_Lines, get_Text
+const IOcrResultVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IOcrResult
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_Lines: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    get_Text: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
+    get_Text: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
     get_TextAngle: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
-pub const IOcrLineVtbl = extern struct {
-    // IUnknown
+// IOcrLine — get_Words, get_Text
+const IOcrLineVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
     AddRef: *const fn (*anyopaque) callconv(.c) u32,
     Release: *const fn (*anyopaque) callconv(.c) u32,
-    // IInspectable
     GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
-    GetRuntimeClassName: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
-    GetTrustLevel: *const fn (*anyopaque, *u32) callconv(.c) HRESULT,
-    // IOcrLine
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_Words: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    get_Text: *const fn (*anyopaque, *?HSTRING) callconv(.c) HRESULT,
+    get_Text: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
 };
 
 // ---------------------------------------------------------------------------
-// COM helpers
+// COM helpers (same pattern as whereami)
 // ---------------------------------------------------------------------------
 
-/// Get vtable pointer from a COM object pointer.
-pub fn vtable_(comptime VtblType: type, obj: *anyopaque) *const VtblType {
+fn vtable_(comptime VtblType: type, obj: *anyopaque) *const VtblType {
     const ptr: *const *const VtblType = @ptrCast(@alignCast(obj));
     return ptr.*;
 }
 
-/// Release a COM object.
-pub fn comRelease(obj: *anyopaque) void {
-    const vtbl = vtable_(IInspectableVtbl, obj);
-    _ = vtbl.Release(obj);
+fn comRelease(obj: *anyopaque) void {
+    const vt = vtable_(IInspectableVtbl, obj);
+    _ = vt.Release(obj);
 }
 
-/// QueryInterface helper — returns the requested interface or null.
-pub fn queryInterface(obj: *anyopaque, iid: *const GUID) ?*anyopaque {
-    const vtbl = vtable_(IInspectableVtbl, obj);
+fn queryInterface(obj: *anyopaque, iid: *const GUID) ?*anyopaque {
+    const vt = vtable_(IInspectableVtbl, obj);
     var result: ?*anyopaque = null;
-    const hr = vtbl.QueryInterface(obj, iid, &result);
-    if (hr != S_OK) return null;
-    return result;
+    const hr = vt.QueryInterface(obj, iid, &result);
+    if (hr == S_OK) return result;
+    return null;
 }
 
 // ---------------------------------------------------------------------------
 // WinRT extern functions
 // ---------------------------------------------------------------------------
 
-extern "api-ms-win-core-winrt-l1-1-0" fn RoInitialize(initType: u32) callconv(.c) HRESULT;
+extern "api-ms-win-core-winrt-l1-1-0" fn RoInitialize(init_type: u32) callconv(.c) HRESULT;
 extern "api-ms-win-core-winrt-l1-1-0" fn RoUninitialize() callconv(.c) void;
-extern "api-ms-win-core-winrt-l1-1-0" fn RoActivateInstance(activatableClassId: HSTRING, instance: *?*anyopaque) callconv(.c) HRESULT;
-extern "api-ms-win-core-winrt-l1-1-0" fn RoGetActivationFactory(activatableClassId: HSTRING, iid: *const GUID, factory: *?*anyopaque) callconv(.c) HRESULT;
+extern "api-ms-win-core-winrt-l1-1-0" fn RoActivateInstance(
+    class_id: HSTRING,
+    instance: *?*anyopaque,
+) callconv(.c) HRESULT;
+extern "api-ms-win-core-winrt-l1-1-0" fn RoGetActivationFactory(
+    class_id: HSTRING,
+    iid: *const GUID,
+    factory: *?*anyopaque,
+) callconv(.c) HRESULT;
 
-extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsCreateString(sourceString: [*]const u16, length: u32, string: *?HSTRING) callconv(.c) HRESULT;
-extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsDeleteString(string: HSTRING) callconv(.c) HRESULT;
-extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsGetStringRawBuffer(string: HSTRING, length: *u32) callconv(.c) [*]const u16;
+extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsCreateString(
+    source: [*]const u16,
+    length: u32,
+    string: *HSTRING,
+) callconv(.c) HRESULT;
+extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsDeleteString(
+    string: HSTRING,
+) callconv(.c) HRESULT;
+extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsGetStringRawBuffer(
+    string: HSTRING,
+    length: ?*u32,
+) callconv(.c) ?[*]const u16;
 
 // ---------------------------------------------------------------------------
 // WinRT class name strings (UTF-16LE)
@@ -408,56 +393,49 @@ const FACE_DETECTOR_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Medi
 const OCR_ENGINE_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Media.Ocr.OcrEngine");
 
 // ---------------------------------------------------------------------------
-// Async helpers
+// Async polling helper (same pattern as whereami)
 // ---------------------------------------------------------------------------
 
-const ASYNC_TIMEOUT_MS: u64 = 30_000;
-const ASYNC_POLL_MS: u64 = 50;
+fn waitForAsync(async_obj: *anyopaque, timeout_ms: u32) vision.VisionError!AsyncStatus {
+    const info = queryInterface(async_obj, &IID_IAsyncInfo) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(info);
 
-/// Polls IAsyncInfo.get_Status() until Completed/Error/Canceled or timeout.
-fn waitForAsync(async_obj: *anyopaque) vision.VisionError!void {
-    const async_info = queryInterface(async_obj, &IID_IAsyncInfo) orelse return vision.VisionError.ImageLoadFailed;
-    defer comRelease(async_info);
+    const info_vt = vtable_(IAsyncInfoVtbl, info);
+    const timeout_ns: i128 = @as(i128, timeout_ms) * std.time.ns_per_ms;
+    const start: i128 = std.time.nanoTimestamp();
 
-    const vtbl = vtable_(IAsyncInfoVtbl, async_info);
-    var elapsed: u64 = 0;
-
-    while (elapsed < ASYNC_TIMEOUT_MS) {
+    while (true) {
         var status: AsyncStatus = .Started;
-        const hr = vtbl.get_Status(async_info, &status);
-        if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
+        _ = info_vt.get_Status(info, &status);
+        if (status != .Started) return status;
 
-        switch (status) {
-            .Completed => return,
-            .Error, .Canceled => return vision.VisionError.ImageLoadFailed,
-            .Started => {
-                std.time.sleep(ASYNC_POLL_MS * std.time.ns_per_ms);
-                elapsed += ASYNC_POLL_MS;
-            },
-        }
+        const now: i128 = std.time.nanoTimestamp();
+        if (now - start >= timeout_ns) return vision.VisionError.DetectionFailed;
+
+        std.Thread.sleep(50 * std.time.ns_per_ms);
     }
-    return vision.VisionError.ImageLoadFailed;
 }
 
-/// QI async_obj for IAsyncOperation with given IID, then call GetResults.
+/// Get async result as *anyopaque. Caller must comRelease.
 fn getAsyncResult(async_obj: *anyopaque, iid: *const GUID) vision.VisionError!*anyopaque {
-    const op = queryInterface(async_obj, iid) orelse return vision.VisionError.ImageLoadFailed;
+    const op = queryInterface(async_obj, iid) orelse
+        return vision.VisionError.DetectionFailed;
     defer comRelease(op);
 
-    const vtbl = vtable_(IAsyncOperationVtbl, op);
-    var result: ?*anyopaque = null;
-    const hr = vtbl.GetResults(op, &result);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    return result orelse vision.VisionError.ImageLoadFailed;
+    const op_vt = vtable_(IAsyncOperationVtbl, op);
+    var result_ptr: ?*anyopaque = null;
+    if (op_vt.GetResults(op, &result_ptr) != S_OK) return vision.VisionError.DetectionFailed;
+    return result_ptr orelse vision.VisionError.DetectionFailed;
 }
 
-/// Convert a UTF-8 path to an HSTRING.
+/// Convert a UTF-8 path to an HSTRING. Caller must WindowsDeleteString.
 fn hstringFromPath(path: []const u8) vision.VisionError!HSTRING {
     var buf: [4096]u16 = undefined;
     const len = std.unicode.utf8ToUtf16Le(&buf, path) catch return vision.VisionError.ImageLoadFailed;
-    var hs: ?HSTRING = null;
-    const hr = WindowsCreateString(&buf, @intCast(len), &hs);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
+    var hs: HSTRING = null;
+    if (WindowsCreateString(&buf, @intCast(len), &hs) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
     return hs orelse vision.VisionError.ImageLoadFailed;
 }
 
@@ -466,8 +444,8 @@ fn hstringFromPath(path: []const u8) vision.VisionError!HSTRING {
 // ---------------------------------------------------------------------------
 
 const ImageData = struct {
-    bitmap: *anyopaque,
-    decoder: *anyopaque,
+    bitmap: *anyopaque, // ISoftwareBitmap
+    decoder: *anyopaque, // IBitmapDecoder (for PixelWidth/PixelHeight)
     width: u32,
     height: u32,
 };
@@ -477,127 +455,145 @@ const ImageData = struct {
 // ---------------------------------------------------------------------------
 
 pub fn loadImage(path: []const u8) vision.VisionError!ImageHandle {
-    // Initialize WinRT (do NOT defer RoUninitialize — other functions need it)
-    const init_hr = RoInitialize(RO_INIT_MULTITHREADED);
-    if (init_hr != S_OK and init_hr != 1) return vision.VisionError.ImageLoadFailed;
+    // RoInitialize is safe to call multiple times — returns S_OK first time,
+    // S_FALSE (1) if already initialized. Do NOT RoUninitialize here since
+    // detectFaces/recognizeText also need WinRT on this thread.
+    const hr_init = RoInitialize(RO_INIT_MULTITHREADED);
+    if (hr_init != S_OK and hr_init != @as(HRESULT, 1))
+        return vision.VisionError.ImageLoadFailed;
 
-    // --- Get StorageFile from path ---
+    // 1. Convert path to HSTRING
     const path_hs = try hstringFromPath(path);
     defer _ = WindowsDeleteString(path_hs);
 
-    // Activate StorageFile statics
-    var class_hs: ?HSTRING = null;
-    var hr = WindowsCreateString(STORAGE_FILE_CLASS, @intCast(STORAGE_FILE_CLASS.len), &class_hs);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer _ = WindowsDeleteString(class_hs.?);
+    // 2. Get StorageFile factory
+    var sf_class_hs: HSTRING = null;
+    if (WindowsCreateString(STORAGE_FILE_CLASS, STORAGE_FILE_CLASS.len, &sf_class_hs) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    defer _ = WindowsDeleteString(sf_class_hs);
 
-    var storage_statics: ?*anyopaque = null;
-    hr = RoGetActivationFactory(class_hs.?, &IID_IStorageFileStatics, &storage_statics);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer comRelease(storage_statics.?);
+    var factory_ptr: ?*anyopaque = null;
+    if (RoGetActivationFactory(sf_class_hs, &IID_IStorageFileStatics, &factory_ptr) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    const factory = factory_ptr.?;
+    defer comRelease(factory);
 
-    // GetFileFromPathAsync
-    const statics_vtbl = vtable_(IStorageFileStaticsVtbl, storage_statics.?);
-    var async_file: ?*anyopaque = null;
-    hr = statics_vtbl.GetFileFromPathAsync(storage_statics.?, path_hs, &async_file);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer comRelease(async_file.?);
+    // 3. GetFileFromPathAsync
+    const sf_vt = vtable_(IStorageFileStaticsVtbl, factory);
+    var file_async_ptr: ?*anyopaque = null;
+    if (sf_vt.GetFileFromPathAsync(factory, path_hs, &file_async_ptr) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    const file_async = file_async_ptr.?;
+    defer comRelease(file_async);
 
-    try waitForAsync(async_file.?);
-    const file_inspectable = try getAsyncResult(async_file.?, &IID_IAsyncOp_StorageFile);
-    defer comRelease(file_inspectable);
+    const file_status = try waitForAsync(file_async, 10000);
+    if (file_status != .Completed) return vision.VisionError.ImageLoadFailed;
 
-    // QI for IStorageFile
-    const storage_file = queryInterface(file_inspectable, &IID_IStorageFile) orelse return vision.VisionError.ImageLoadFailed;
+    const storage_file = try getAsyncResult(file_async, &IID_IAsyncOp_StorageFile);
     defer comRelease(storage_file);
 
-    // --- Open stream ---
-    const file_vtbl = vtable_(IStorageFileVtbl, storage_file);
-    var async_stream: ?*anyopaque = null;
-    hr = file_vtbl.OpenAsync(storage_file, 0, &async_stream); // 0 = Read
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer comRelease(async_stream.?);
+    // 4. OpenAsync(FileAccessMode.Read = 0) → IRandomAccessStream
+    // QI for IStorageFile interface (NOT IStorageFileStatics — that's the factory)
+    const sf_iface = queryInterface(storage_file, &IID_IStorageFile) orelse
+        return vision.VisionError.ImageLoadFailed;
+    defer comRelease(sf_iface);
 
-    try waitForAsync(async_stream.?);
-    const stream = try getAsyncResult(async_stream.?, &IID_IAsyncOp_IRandomAccessStream);
+    const sf_file_vt = vtable_(IStorageFileVtbl, sf_iface);
+    var stream_async_ptr: ?*anyopaque = null;
+    if (sf_file_vt.OpenAsync(sf_iface, 0, &stream_async_ptr) != S_OK) // 0 = Read
+        return vision.VisionError.ImageLoadFailed;
+    const stream_async = stream_async_ptr.?;
+    defer comRelease(stream_async);
+
+    const stream_status = try waitForAsync(stream_async, 10000);
+    if (stream_status != .Completed) return vision.VisionError.ImageLoadFailed;
+
+    const stream = try getAsyncResult(stream_async, &IID_IAsyncOp_IRandomAccessStream);
     defer comRelease(stream);
 
-    // --- Create BitmapDecoder ---
-    var decoder_class_hs: ?HSTRING = null;
-    hr = WindowsCreateString(BITMAP_DECODER_CLASS, @intCast(BITMAP_DECODER_CLASS.len), &decoder_class_hs);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer _ = WindowsDeleteString(decoder_class_hs.?);
+    // 5. BitmapDecoder.CreateAsync(stream)
+    var bd_class_hs: HSTRING = null;
+    if (WindowsCreateString(BITMAP_DECODER_CLASS, BITMAP_DECODER_CLASS.len, &bd_class_hs) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    defer _ = WindowsDeleteString(bd_class_hs);
 
-    var decoder_statics: ?*anyopaque = null;
-    hr = RoGetActivationFactory(decoder_class_hs.?, &IID_IBitmapDecoderStatics, &decoder_statics);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer comRelease(decoder_statics.?);
+    var bd_factory_ptr: ?*anyopaque = null;
+    if (RoGetActivationFactory(bd_class_hs, &IID_IBitmapDecoderStatics, &bd_factory_ptr) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    const bd_factory = bd_factory_ptr.?;
+    defer comRelease(bd_factory);
 
-    const dec_statics_vtbl = vtable_(IBitmapDecoderStaticsVtbl, decoder_statics.?);
-    var async_decoder: ?*anyopaque = null;
-    hr = dec_statics_vtbl.CreateAsync(decoder_statics.?, stream, &async_decoder);
-    if (hr != S_OK) return vision.VisionError.ImageLoadFailed;
-    defer comRelease(async_decoder.?);
+    const bd_statics_vt = vtable_(IBitmapDecoderStaticsVtbl, bd_factory);
+    var decoder_async_ptr: ?*anyopaque = null;
+    if (bd_statics_vt.CreateAsync(bd_factory, stream, &decoder_async_ptr) != S_OK)
+        return vision.VisionError.ImageLoadFailed;
+    const decoder_async = decoder_async_ptr.?;
+    defer comRelease(decoder_async);
 
-    try waitForAsync(async_decoder.?);
-    const decoder = try getAsyncResult(async_decoder.?, &IID_IAsyncOp_BitmapDecoder);
-    // decoder is kept alive in ImageData — do NOT defer release here
+    const decoder_status = try waitForAsync(decoder_async, 10000);
+    if (decoder_status != .Completed) return vision.VisionError.ImageLoadFailed;
 
-    // --- Get dimensions from IBitmapFrame (BitmapDecoder implements it) ---
-    const frame_vtbl = vtable_(IBitmapFrameVtbl, decoder);
+    const decoder = try getAsyncResult(decoder_async, &IID_IAsyncOp_BitmapDecoder);
+    // Don't release decoder — we keep it in ImageData
+
+    // 6. Get image dimensions from IBitmapFrame (BitmapDecoder implements IBitmapFrame)
+    const frame_vt = vtable_(IBitmapFrameVtbl, decoder);
     var pixel_width: u32 = 0;
     var pixel_height: u32 = 0;
-    hr = frame_vtbl.get_PixelWidth(decoder, &pixel_width);
-    if (hr != S_OK) {
+    if (frame_vt.get_PixelWidth(decoder, &pixel_width) != S_OK) {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     }
-    hr = frame_vtbl.get_PixelHeight(decoder, &pixel_height);
-    if (hr != S_OK) {
+    if (frame_vt.get_PixelHeight(decoder, &pixel_height) != S_OK) {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     }
 
-    // --- Get SoftwareBitmap ---
-    const sw_frame = queryInterface(decoder, &IID_IBitmapFrameWithSoftwareBitmap) orelse {
+    // 7. GetSoftwareBitmapAsync via IBitmapFrameWithSoftwareBitmap
+    const frame_swb = queryInterface(decoder, &IID_IBitmapFrameWithSoftwareBitmap) orelse {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     };
-    defer comRelease(sw_frame);
+    defer comRelease(frame_swb);
 
-    const sw_vtbl = vtable_(IBitmapFrameWithSoftwareBitmapVtbl, sw_frame);
-    var async_bitmap: ?*anyopaque = null;
-    hr = sw_vtbl.GetSoftwareBitmapAsync(sw_frame, &async_bitmap);
-    if (hr != S_OK) {
+    const swb_vt = vtable_(IBitmapFrameWithSoftwareBitmapVtbl, frame_swb);
+    var bitmap_async_ptr: ?*anyopaque = null;
+    if (swb_vt.GetSoftwareBitmapAsync(frame_swb, &bitmap_async_ptr) != S_OK) {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     }
-    defer comRelease(async_bitmap.?);
+    const bitmap_async = bitmap_async_ptr.?;
+    defer comRelease(bitmap_async);
 
-    waitForAsync(async_bitmap.?) catch {
+    const bitmap_status = waitForAsync(bitmap_async, 10000) catch {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     };
-    const bitmap = getAsyncResult(async_bitmap.?, &IID_IAsyncOp_SoftwareBitmap) catch {
+    if (bitmap_status != .Completed) {
+        comRelease(decoder);
+        return vision.VisionError.ImageLoadFailed;
+    }
+
+    const software_bitmap = getAsyncResult(bitmap_async, &IID_IAsyncOp_SoftwareBitmap) catch {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     };
+    // Don't release software_bitmap — we keep it in ImageData
 
-    // --- Pack into ImageData ---
-    const allocator = std.heap.page_allocator;
-    const data = allocator.create(ImageData) catch {
-        comRelease(bitmap);
+    // 8. Pack into ImageData
+    const page_alloc = std.heap.page_allocator;
+    const image_data = page_alloc.create(ImageData) catch {
+        comRelease(software_bitmap);
         comRelease(decoder);
         return vision.VisionError.OutOfMemory;
     };
-    data.* = .{
-        .bitmap = bitmap,
+    image_data.* = .{
+        .bitmap = software_bitmap,
         .decoder = decoder,
         .width = pixel_width,
         .height = pixel_height,
     };
-
-    return @ptrCast(data);
+    return @ptrCast(image_data);
 }
 
 pub fn freeImage(image: ImageHandle) void {
