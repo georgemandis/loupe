@@ -55,6 +55,7 @@ const IID_IStorageFileStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4
 const IID_IStorageFile = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 const IID_IBitmapDecoderStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 const IID_IBitmapDecoder = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IBitmapFrame = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 const IID_IBitmapFrameWithSoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 const IID_ISoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
 
@@ -407,7 +408,8 @@ fn waitForAsync(async_obj: *anyopaque, timeout_ms: u32) vision.VisionError!Async
 
     while (true) {
         var status: AsyncStatus = .Started;
-        _ = info_vt.get_Status(info, &status);
+        if (info_vt.get_Status(info, &status) != S_OK)
+            return vision.VisionError.DetectionFailed;
         if (status != .Started) return status;
 
         const now: i128 = std.time.nanoTimestamp();
@@ -537,14 +539,21 @@ pub fn loadImage(path: []const u8) vision.VisionError!ImageHandle {
     // Don't release decoder — we keep it in ImageData
 
     // 6. Get image dimensions from IBitmapFrame (BitmapDecoder implements IBitmapFrame)
-    const frame_vt = vtable_(IBitmapFrameVtbl, decoder);
+    // Must QI for IBitmapFrame — direct vtable cast is COM UB
+    const frame_iface = queryInterface(decoder, &IID_IBitmapFrame) orelse {
+        comRelease(decoder);
+        return vision.VisionError.ImageLoadFailed;
+    };
+    defer comRelease(frame_iface);
+
+    const frame_vt = vtable_(IBitmapFrameVtbl, frame_iface);
     var pixel_width: u32 = 0;
     var pixel_height: u32 = 0;
-    if (frame_vt.get_PixelWidth(decoder, &pixel_width) != S_OK) {
+    if (frame_vt.get_PixelWidth(frame_iface, &pixel_width) != S_OK) {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     }
-    if (frame_vt.get_PixelHeight(decoder, &pixel_height) != S_OK) {
+    if (frame_vt.get_PixelHeight(frame_iface, &pixel_height) != S_OK) {
         comRelease(decoder);
         return vision.VisionError.ImageLoadFailed;
     }
