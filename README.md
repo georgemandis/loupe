@@ -63,7 +63,7 @@ loupe_free_image(handle);
 | Platform | Status |
 |----------|--------|
 | macOS    | Supported (Vision framework) |
-| Windows  | Planned (Windows Vision APIs) |
+| Windows  | Supported (face detection, OCR). Barcode, blur/redact, and image output (`-o`) not yet available. |
 | Linux    | Not applicable (no native vision API) |
 
 ## License
