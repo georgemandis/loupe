@@ -355,10 +355,116 @@ pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionErro
     return ocr_results;
 }
 
+fn mapSymbology(ns_symbology: objc.id) vision.Symbology {
+    const cstr = objc.fromNSString(ns_symbology) orelse return .unknown;
+    const s = std.mem.sliceTo(cstr, 0);
+    if (std.mem.endsWith(u8, s, "QR")) return .qr;
+    if (std.mem.endsWith(u8, s, "EAN13")) return .ean13;
+    if (std.mem.endsWith(u8, s, "EAN8")) return .ean8;
+    if (std.mem.endsWith(u8, s, "UPCA")) return .upca;
+    if (std.mem.endsWith(u8, s, "UPCE")) return .upce;
+    if (std.mem.endsWith(u8, s, "Code128")) return .code128;
+    if (std.mem.endsWith(u8, s, "Code39")) return .code39;
+    if (std.mem.endsWith(u8, s, "Code93")) return .code93;
+    if (std.mem.endsWith(u8, s, "ITF14")) return .itf14;
+    if (std.mem.endsWith(u8, s, "DataMatrix")) return .datamatrix;
+    if (std.mem.endsWith(u8, s, "PDF417")) return .pdf417;
+    if (std.mem.endsWith(u8, s, "Aztec")) return .aztec;
+    return .unknown;
+}
+
 pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.BarcodeResult {
-    _ = allocator;
-    _ = image;
-    return vision.VisionError.UnsupportedPlatform;
+    // 1. Create empty NSDictionary for options
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    // 2. Create VNImageRequestHandler from CGImage
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+
+    // 3. Create VNDetectBarcodesRequest
+    const RequestClass = objc.getClass("VNDetectBarcodesRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+
+    // 4. Wrap request in NSArray and perform
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    // 5. Get results — NSArray of VNBarcodeObservation
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) {
+        objc.msgSend(void, handler, objc.sel("release"), .{});
+        objc.msgSend(void, request, objc.sel("release"), .{});
+        return allocator.alloc(vision.BarcodeResult, 0) catch return vision.VisionError.OutOfMemory;
+    }
+
+    // Allocate output slice (may shrink if some observations have no payload)
+    const barcodes = allocator.alloc(vision.BarcodeResult, count) catch return vision.VisionError.OutOfMemory;
+    var actual_count: usize = 0;
+
+    // 6. Iterate observations
+    for (0..count) |i| {
+        const observation = objc.nsArrayObjectAtIndex(results, i);
+
+        // Get payload string — may be nil
+        const get_payload_fn: *const fn (objc.id, objc.SEL) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+        const ns_payload = get_payload_fn(observation, objc.sel("payloadStringValue"));
+        if (ns_payload == null) continue;
+
+        const c_str = objc.fromNSString(ns_payload.?) orelse continue;
+        const payload_len = std.mem.len(c_str);
+
+        // Copy payload into heap-allocated Zig slice
+        const payload_copy = allocator.alloc(u8, payload_len) catch {
+            for (0..actual_count) |j| allocator.free(barcodes[j].payload);
+            allocator.free(barcodes);
+            objc.msgSend(void, handler, objc.sel("release"), .{});
+            objc.msgSend(void, request, objc.sel("release"), .{});
+            return vision.VisionError.OutOfMemory;
+        };
+        @memcpy(payload_copy, c_str[0..payload_len]);
+
+        // Get symbology
+        const ns_symbology = objc.msgSend(objc.id, observation, objc.sel("symbology"), .{});
+        const sym = mapSymbology(ns_symbology);
+
+        // Get bounding box and flip Y coordinate
+        const bbox = getBoundingBox(observation);
+        const y_flipped = 1.0 - bbox.origin_y - bbox.size_height;
+
+        barcodes[actual_count] = .{
+            .payload = payload_copy,
+            .symbology = sym,
+            .box = .{
+                .x = bbox.origin_x,
+                .y = y_flipped,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+        };
+        actual_count += 1;
+    }
+
+    // Release alloc+init objects
+    objc.msgSend(void, handler, objc.sel("release"), .{});
+    objc.msgSend(void, request, objc.sel("release"), .{});
+
+    // Shrink to actual size if some observations were skipped
+    if (actual_count < count) {
+        return allocator.realloc(barcodes, actual_count) catch return vision.VisionError.OutOfMemory;
+    }
+
+    return barcodes;
 }
 
 // ---------------------------------------------------------------------------

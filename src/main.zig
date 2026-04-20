@@ -77,16 +77,10 @@ pub fn main() !void {
         return;
     }
 
-    if (std.mem.eql(u8, subcommand, "barcode")) {
-        try stderr.interface.print("Error: 'barcode' subcommand is not yet implemented.\n", .{});
-        try stderr.interface.flush();
-        std.process.exit(1);
-    }
-
-    if (std.mem.eql(u8, subcommand, "qr")) {
-        try stderr.interface.print("Error: 'qr' subcommand is not yet implemented.\n", .{});
-        try stderr.interface.flush();
-        std.process.exit(1);
+    if (std.mem.eql(u8, subcommand, "barcode") or std.mem.eql(u8, subcommand, "qr")) {
+        const qr_only = std.mem.eql(u8, subcommand, "qr");
+        runBarcode(allocator, args[2..], qr_only, &stdout.interface, &stderr.interface);
+        return;
     }
 
     // Unknown subcommand
@@ -320,6 +314,117 @@ fn printOcrJson(writer: *std.io.Writer, results: []const vision.OcrResult) void 
             r.box.width,
             r.box.height,
             r.confidence,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+// ---------------------------------------------------------------------------
+// barcode / qr subcommand
+// ---------------------------------------------------------------------------
+
+fn runBarcode(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    qr_only: bool,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+
+    var i: usize = 0;
+    while (i < sub_args.len) : (i += 1) {
+        const arg = sub_args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        const cmd = if (qr_only) "qr" else "barcode";
+        stderr_writer.print("Error: missing image path.\nUsage: loupe {s} [--json] <image>\n", .{cmd}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    const handle = vision.loadImage(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const results = vision.scanBarcodes(allocator, handle) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeResults(allocator, vision.BarcodeResult, results);
+
+    if (json_mode) {
+        printBarcodesJson(stdout_writer, results, qr_only);
+    } else {
+        printBarcodesHuman(stdout_writer, results, qr_only);
+    }
+    stdout_writer.flush() catch {};
+
+    std.process.exit(0);
+}
+
+fn symbologyName(s: vision.Symbology) []const u8 {
+    return switch (s) {
+        .qr => "QR",
+        .ean13 => "EAN-13",
+        .ean8 => "EAN-8",
+        .upca => "UPC-A",
+        .upce => "UPC-E",
+        .code128 => "Code 128",
+        .code39 => "Code 39",
+        .code93 => "Code 93",
+        .itf14 => "ITF-14",
+        .datamatrix => "Data Matrix",
+        .pdf417 => "PDF417",
+        .aztec => "Aztec",
+        .unknown => "Unknown",
+    };
+}
+
+fn printBarcodesHuman(writer: *std.io.Writer, results: []const vision.BarcodeResult, qr_only: bool) void {
+    var printed: usize = 0;
+    for (results) |r| {
+        if (qr_only and r.symbology != .qr) continue;
+        writer.print("{s}: {s}\n", .{ symbologyName(r.symbology), r.payload }) catch {};
+        printed += 1;
+    }
+    if (printed == 0) {
+        if (qr_only) {
+            writer.print("No QR codes detected.\n", .{}) catch {};
+        } else {
+            writer.print("No barcodes detected.\n", .{}) catch {};
+        }
+    }
+}
+
+fn printBarcodesJson(writer: *std.io.Writer, results: []const vision.BarcodeResult, qr_only: bool) void {
+    writer.print("{{\"barcodes\":[", .{}) catch {};
+    var first = true;
+    for (results) |r| {
+        if (qr_only and r.symbology != .qr) continue;
+        if (!first) writer.print(",", .{}) catch {};
+        first = false;
+        writer.print("{{\"payload\":\"", .{}) catch {};
+        writeJsonString(writer, r.payload);
+        writer.print("\",\"symbology\":\"{s}\",\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4}}}", .{
+            @tagName(r.symbology),
+            r.box.x,
+            r.box.y,
+            r.box.width,
+            r.box.height,
         }) catch {};
     }
     writer.print("]}}\n", .{}) catch {};
