@@ -623,9 +623,110 @@ pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
 // ---------------------------------------------------------------------------
 
 pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.FaceResult {
-    _ = allocator;
-    _ = image;
-    return vision.VisionError.UnsupportedPlatform;
+    const data: *ImageData = @ptrCast(@alignCast(image));
+    const width_f: f64 = @floatFromInt(data.width);
+    const height_f: f64 = @floatFromInt(data.height);
+
+    // Ensure WinRT is initialized (safe to call multiple times, returns S_FALSE if already init'd)
+    const hr_init = RoInitialize(RO_INIT_MULTITHREADED);
+    if (hr_init != S_OK and hr_init != @as(HRESULT, 1))
+        return vision.VisionError.DetectionFailed;
+
+    // 1. Get FaceDetector factory
+    var fd_class_hs: HSTRING = null;
+    if (WindowsCreateString(FACE_DETECTOR_CLASS, FACE_DETECTOR_CLASS.len, &fd_class_hs) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    defer _ = WindowsDeleteString(fd_class_hs);
+
+    var fd_factory_ptr: ?*anyopaque = null;
+    if (RoGetActivationFactory(fd_class_hs, &IID_IFaceDetectorStatics, &fd_factory_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const fd_factory = fd_factory_ptr.?;
+    defer comRelease(fd_factory);
+
+    // 2. CreateAsync → FaceDetector
+    const fd_statics_vt = vtable_(IFaceDetectorStaticsVtbl, fd_factory);
+    var create_async_ptr: ?*anyopaque = null;
+    if (fd_statics_vt.CreateAsync(fd_factory, &create_async_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const create_async = create_async_ptr.?;
+    defer comRelease(create_async);
+
+    const create_status = try waitForAsync(create_async, 10000);
+    if (create_status != .Completed) return vision.VisionError.DetectionFailed;
+
+    const detector = try getAsyncResult(create_async, &IID_IAsyncOp_FaceDetector);
+    defer comRelease(detector);
+
+    // 3. QI for IFaceDetector
+    const fd_iface = queryInterface(detector, &IID_IFaceDetector) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(fd_iface);
+
+    // 4. DetectFacesAsync(bitmap)
+    // NOTE: May need to convert bitmap to Gray8 first. Check IsBitmapPixelFormatSupported.
+    const fd_vt = vtable_(IFaceDetectorVtbl, fd_iface);
+    var detect_async_ptr: ?*anyopaque = null;
+    if (fd_vt.DetectFacesAsync(fd_iface, data.bitmap, &detect_async_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const detect_async = detect_async_ptr.?;
+    defer comRelease(detect_async);
+
+    const detect_status = try waitForAsync(detect_async, 30000);
+    if (detect_status != .Completed) return vision.VisionError.DetectionFailed;
+
+    // 5. Get IVectorView<DetectedFace>
+    // DetectFacesAsync returns IAsyncOperation<IVectorView<DetectedFace>>
+    const faces_vector = try getAsyncResult(detect_async, &IID_IAsyncOp_VectorView_DetectedFace);
+    defer comRelease(faces_vector);
+
+    const vec_iface = queryInterface(faces_vector, &IID_IVectorView_DetectedFace) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(vec_iface);
+
+    const vec_vt = vtable_(IVectorViewVtbl, vec_iface);
+    var count: u32 = 0;
+    if (vec_vt.get_Size(vec_iface, &count) != S_OK)
+        return vision.VisionError.DetectionFailed;
+
+    if (count == 0) {
+        return allocator.alloc(vision.FaceResult, 0) catch return vision.VisionError.OutOfMemory;
+    }
+
+    // 6. Iterate and normalize coordinates
+    const faces = allocator.alloc(vision.FaceResult, count) catch return vision.VisionError.OutOfMemory;
+    var actual_count: usize = 0;
+
+    for (0..count) |i| {
+        var face_ptr: ?*anyopaque = null;
+        if (vec_vt.GetAt(vec_iface, @intCast(i), &face_ptr) != S_OK) continue;
+        const face_obj = face_ptr.?;
+        defer comRelease(face_obj);
+
+        const face_iface = queryInterface(face_obj, &IID_IDetectedFace) orelse continue;
+        defer comRelease(face_iface);
+
+        const face_vt = vtable_(IDetectedFaceVtbl, face_iface);
+        var bounds: BitmapBounds = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
+        if (face_vt.get_FaceBox(face_iface, &bounds) != S_OK) continue;
+
+        faces[actual_count] = .{
+            .box = .{
+                .x = @as(f64, @floatFromInt(bounds.x)) / width_f,
+                .y = @as(f64, @floatFromInt(bounds.y)) / height_f,
+                .width = @as(f64, @floatFromInt(bounds.width)) / width_f,
+                .height = @as(f64, @floatFromInt(bounds.height)) / height_f,
+            },
+            .confidence = 1.0, // Windows FaceDetector doesn't report confidence
+        };
+        actual_count += 1;
+    }
+
+    // Shrink if some entries were skipped
+    if (actual_count < count) {
+        return allocator.realloc(faces, actual_count) catch return vision.VisionError.OutOfMemory;
+    }
+    return faces;
 }
 
 pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
