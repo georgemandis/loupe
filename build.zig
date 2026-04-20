@@ -35,7 +35,8 @@ pub fn build(b: *std.Build) void {
             vision_mod.linkFramework("ImageIO", .{});
         },
         .windows => {
-            // No system libraries yet — all stubs
+            vision_mod.linkSystemLibrary("api-ms-win-core-winrt-l1-1-0", .{});
+            vision_mod.linkSystemLibrary("api-ms-win-core-winrt-string-l1-1-0", .{});
         },
         else => {
             // No Linux support. build.zig stays silent so `zig build --help` still works.
