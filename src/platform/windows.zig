@@ -730,9 +730,120 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
 }
 
 pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
-    _ = allocator;
-    _ = image;
-    return vision.VisionError.UnsupportedPlatform;
+    const data: *ImageData = @ptrCast(@alignCast(image));
+
+    // Ensure WinRT is initialized
+    const hr_init = RoInitialize(RO_INIT_MULTITHREADED);
+    if (hr_init != S_OK and hr_init != @as(HRESULT, 1))
+        return vision.VisionError.DetectionFailed;
+
+    // 1. Create OcrEngine from user profile languages
+    var ocr_class_hs: HSTRING = null;
+    if (WindowsCreateString(OCR_ENGINE_CLASS, OCR_ENGINE_CLASS.len, &ocr_class_hs) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    defer _ = WindowsDeleteString(ocr_class_hs);
+
+    var ocr_factory_ptr: ?*anyopaque = null;
+    if (RoGetActivationFactory(ocr_class_hs, &IID_IOcrEngineStatics, &ocr_factory_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const ocr_factory = ocr_factory_ptr.?;
+    defer comRelease(ocr_factory);
+
+    const ocr_statics_vt = vtable_(IOcrEngineStaticsVtbl, ocr_factory);
+    var engine_ptr: ?*anyopaque = null;
+    if (ocr_statics_vt.TryCreateFromUserProfileLanguages(ocr_factory, &engine_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const engine = engine_ptr orelse return vision.VisionError.DetectionFailed;
+    defer comRelease(engine);
+
+    // 2. QI for IOcrEngine
+    const engine_iface = queryInterface(engine, &IID_IOcrEngine) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(engine_iface);
+
+    // 3. RecognizeAsync(bitmap)
+    const engine_vt = vtable_(IOcrEngineVtbl, engine_iface);
+    var recognize_async_ptr: ?*anyopaque = null;
+    if (engine_vt.RecognizeAsync(engine_iface, data.bitmap, &recognize_async_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const recognize_async = recognize_async_ptr.?;
+    defer comRelease(recognize_async);
+
+    const recognize_status = try waitForAsync(recognize_async, 30000);
+    if (recognize_status != .Completed) return vision.VisionError.DetectionFailed;
+
+    // 4. Get OcrResult
+    const ocr_result = try getAsyncResult(recognize_async, &IID_IAsyncOp_OcrResult);
+    defer comRelease(ocr_result);
+
+    const result_iface = queryInterface(ocr_result, &IID_IOcrResult) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(result_iface);
+
+    // 5. Get lines
+    const result_vt = vtable_(IOcrResultVtbl, result_iface);
+    var lines_ptr: ?*anyopaque = null;
+    if (result_vt.get_Lines(result_iface, &lines_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const lines = lines_ptr orelse return vision.VisionError.DetectionFailed;
+    defer comRelease(lines);
+
+    const lines_iface = queryInterface(lines, &IID_IVectorView_OcrLine) orelse
+        return vision.VisionError.DetectionFailed;
+    defer comRelease(lines_iface);
+
+    const lines_vt = vtable_(IVectorViewVtbl, lines_iface);
+    var line_count: u32 = 0;
+    if (lines_vt.get_Size(lines_iface, &line_count) != S_OK)
+        return vision.VisionError.DetectionFailed;
+
+    if (line_count == 0) {
+        return allocator.alloc(vision.OcrResult, 0) catch return vision.VisionError.OutOfMemory;
+    }
+
+    // 6. Iterate lines and extract text
+    const ocr_results = allocator.alloc(vision.OcrResult, line_count) catch
+        return vision.VisionError.OutOfMemory;
+    var actual_count: usize = 0;
+
+    for (0..line_count) |i| {
+        var line_ptr: ?*anyopaque = null;
+        if (lines_vt.GetAt(lines_iface, @intCast(i), &line_ptr) != S_OK) continue;
+        const line_obj = line_ptr.?;
+        defer comRelease(line_obj);
+
+        const line_iface = queryInterface(line_obj, &IID_IOcrLine) orelse continue;
+        defer comRelease(line_iface);
+
+        const line_vt = vtable_(IOcrLineVtbl, line_iface);
+        var text_hs: HSTRING = null;
+        if (line_vt.get_Text(line_iface, &text_hs) != S_OK) continue;
+        defer _ = WindowsDeleteString(text_hs);
+
+        // Convert HSTRING to UTF-8
+        var text_len: u32 = 0;
+        const raw_buf = WindowsGetStringRawBuffer(text_hs, &text_len) orelse continue;
+        const utf16_slice = raw_buf[0..text_len];
+
+        const utf8 = std.unicode.utf16LeToUtf8Alloc(allocator, utf16_slice) catch {
+            for (0..actual_count) |j| allocator.free(ocr_results[j].text);
+            allocator.free(ocr_results);
+            return vision.VisionError.OutOfMemory;
+        };
+
+        ocr_results[actual_count] = .{
+            .text = utf8,
+            .box = .{ .x = 0, .y = 0, .width = 0, .height = 0 }, // No per-line bbox in v1
+            .confidence = 1.0, // Windows OCR doesn't report per-line confidence
+        };
+        actual_count += 1;
+    }
+
+    // Shrink if needed
+    if (actual_count < line_count) {
+        return allocator.realloc(ocr_results, actual_count) catch return vision.VisionError.OutOfMemory;
+    }
+    return ocr_results;
 }
 
 pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.BarcodeResult {
