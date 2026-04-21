@@ -1,12 +1,27 @@
 # loupe
 
-Computer vision CLI & library — detect faces, read text, and scan barcodes using native OS APIs.
+Computer vision CLI & library powered by native OS APIs.
 
-Built in Zig, wrapping macOS Vision framework (and eventually Windows Vision APIs). Produces a standalone CLI binary and a C-compatible shared library for FFI integration.
+Built in [Zig](https://ziglang.org), wrapping macOS Vision framework and Windows WinRT APIs. Produces a standalone CLI binary and a C-compatible shared library for FFI integration.
 
-## Install from source
+## Install
 
-Requires [Zig 0.14+](https://ziglang.org/download/).
+### Homebrew (macOS)
+
+```bash
+brew install georgemandis/tap/loupe
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add georgemandis https://github.com/georgemandis/scoop-bucket
+scoop install loupe
+```
+
+### From source
+
+Requires [Zig 0.15+](https://ziglang.org/download/).
 
 ```bash
 git clone https://github.com/georgemandis/loupe.git
@@ -15,37 +30,104 @@ zig build
 ```
 
 Binary: `zig-out/bin/loupe`
-Library: `zig-out/lib/libloupe.dylib` / `libloupe.a`
+Library: `zig-out/lib/libloupe.dylib` / `zig-out/bin/loupe.dll`
 
 ## Usage
 
 ### Face detection
 
 ```bash
-loupe faces photo.jpg
-loupe faces photo.jpg --json
-loupe faces photo.jpg -o blurred.jpg --blur
-loupe faces photo.jpg -o redacted.png --redact
+loupe faces photo.jpg                         # detect faces
+loupe faces -o face.png photo.jpg             # extract each face to a file
+loupe faces --blur -o blurred.jpg photo.jpg   # blur faces
+loupe faces --redact -o redacted.png photo.jpg # black-box faces
 ```
 
 ### OCR (text recognition)
 
 ```bash
 loupe ocr screenshot.png
-loupe ocr screenshot.png --json
+loupe ocr --json screenshot.png
 ```
 
 ### Barcode & QR code scanning
 
 ```bash
 loupe barcode image.png
-loupe barcode image.png --json
-loupe qr image.png           # QR codes only
+loupe qr image.png          # QR codes only
 ```
+
+### Image classification
+
+Classify image content using 1,300+ scene and object labels.
+
+```bash
+loupe classify photo.jpg
+loupe classify --json photo.jpg
+```
+
+### Facial landmarks
+
+Detect detailed facial feature points (eyes, nose, mouth, eyebrows, jawline).
+
+```bash
+loupe landmarks photo.jpg
+loupe landmarks --json photo.jpg
+```
+
+### Body & hand pose
+
+Detect skeletal joint positions for humans and hands.
+
+```bash
+loupe body photo.jpg
+loupe hands photo.jpg
+```
+
+### Animal detection
+
+```bash
+loupe animals photo.jpg
+```
+
+### More commands
+
+```bash
+loupe rectangles photo.jpg     # detect rectangular shapes
+loupe horizon photo.jpg        # measure image tilt
+loupe saliency photo.jpg       # find visually salient regions
+loupe saliency --objects img.jpg # objectness-based saliency
+loupe score photo.jpg          # aesthetic quality score (macOS 15+)
+loupe segment photo.jpg        # person segmentation mask
+```
+
+All commands support `--json` for machine-readable output.
+
+## Platform support
+
+|  | macOS | Windows |
+|--|-------|---------|
+| Face detection | Yes | Yes |
+| OCR | Yes | Yes |
+| Barcode/QR | Yes | - |
+| Face extraction (`-o`) | Yes | - |
+| Blur/redact | Yes | - |
+| Classification | Yes | - |
+| Facial landmarks | Yes | - |
+| Body pose | Yes | - |
+| Hand pose | Yes | - |
+| Animal detection | Yes | - |
+| Rectangles | Yes | - |
+| Horizon | Yes | - |
+| Saliency | Yes | - |
+| Aesthetic score | Yes (15+) | - |
+| Person segmentation | Yes | - |
+
+The macOS build uses the Vision framework. The Windows build uses WinRT (face detection and OCR). Commands not available on your platform are hidden from `--help`.
 
 ## C ABI
 
-loupe exports a C-compatible API for use from any language with FFI support (Bun, Rust, Python, etc.). See `src/c_api.zig` for the full API surface.
+loupe exports a C-compatible API for use from any language with FFI support. See `src/c_api.zig` for the full API surface.
 
 ```c
 void* handle = loupe_load_image("photo.jpg");
@@ -57,14 +139,6 @@ loupe_detect_faces(handle, &faces, &count);
 loupe_free(faces);
 loupe_free_image(handle);
 ```
-
-## Platform support
-
-| Platform | Status |
-|----------|--------|
-| macOS    | Supported (Vision framework) |
-| Windows  | Supported (face detection, OCR). Barcode, blur/redact, and image output (`-o`) not yet available. |
-| Linux    | Not applicable (no native vision API) |
 
 ## License
 

@@ -33,6 +33,7 @@ pub fn build(b: *std.Build) void {
             vision_mod.linkFramework("CoreGraphics", .{});
             vision_mod.linkFramework("CoreImage", .{});
             vision_mod.linkFramework("ImageIO", .{});
+            vision_mod.linkFramework("CoreVideo", .{});
         },
         .windows => {
             vision_mod.linkSystemLibrary("api-ms-win-core-winrt-l1-1-0", .{});

@@ -908,3 +908,62 @@ pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const vision
     _ = mode;
     return vision.VisionError.UnsupportedPlatform;
 }
+
+pub fn classifyImage(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.ClassifyResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectFaceLandmarks(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.FaceLandmarksResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectBodyPose(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.BodyPoseResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectHandPose(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.HandPoseResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectSaliency(allocator: Allocator, image: ImageHandle, attention: bool) vision.VisionError![]vision.SaliencyRect {
+    _ = allocator;
+    _ = image;
+    _ = attention;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectHorizon(image: ImageHandle) vision.VisionError!vision.HorizonResult {
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn recognizeAnimals(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.AnimalResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectRectangles(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.RectangleResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn scoreAesthetics(image: ImageHandle) vision.VisionError!vision.AestheticsResult {
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn segmentPerson(allocator: Allocator, image: ImageHandle) vision.VisionError!vision.SegmentResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}

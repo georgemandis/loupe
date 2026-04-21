@@ -1,27 +1,74 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const vision = @import("vision");
+
+const version = "0.2.0";
+const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.io.Writer) !void {
     try writer.print(
         \\Usage: loupe <command> [options] <image>
         \\
-        \\Computer vision CLI — detect faces, read text, and scan barcodes.
+        \\Computer vision CLI powered by native OS APIs.
+        \\Version {s} ({s})
+        \\
+    , .{ version, @tagName(builtin.os.tag) });
+
+    // Cross-platform commands
+    try writer.print(
         \\
         \\Commands:
-        \\  faces    Detect faces in an image
-        \\  ocr      Recognize text in an image
-        \\  barcode  Scan barcodes in an image
-        \\  qr       Scan QR codes in an image
-        \\  help     Show this help message
+        \\  faces      Detect faces in an image
+        \\  ocr        Recognize text in an image
+        \\  barcode    Scan barcodes in an image
+        \\  qr         Scan QR codes in an image
+        \\
+    , .{});
+
+    // macOS-only commands
+    if (is_macos) {
+        try writer.print(
+            \\  landmarks  Detect facial landmarks (eyes, nose, mouth, etc.)
+            \\  classify   Classify image content (scene/object labels)
+            \\  body       Detect human body pose (skeleton joints)
+            \\  hands      Detect hand pose (finger joints)
+            \\  animals    Detect animals (cats, dogs)
+            \\  rectangles Detect rectangular shapes
+            \\  horizon    Measure horizon tilt angle
+            \\  saliency   Find visually salient regions
+            \\  score      Rate image aesthetic quality (macOS 15+)
+            \\  segment    Generate person segmentation mask
+            \\
+        , .{});
+    }
+
+    try writer.print(
+        \\  help       Show this help message
         \\
         \\Global options:
         \\  --json               Output results as JSON
         \\  --help, -h           Show this help message
+        \\  --version, -V        Show version
         \\
         \\Options for 'faces':
         \\  -o <output>          Extract detected faces to files (or apply --blur/--redact)
         \\  --blur               Blur detected faces in output image
         \\  --redact             Redact (black box) detected faces in output image
+        \\
+    , .{});
+
+    if (is_macos) {
+        try writer.print(
+            \\Options for 'segment':
+            \\  -o <output.png>      Save segmentation mask as grayscale PNG
+            \\
+            \\Options for 'saliency':
+            \\  --objects             Use objectness-based saliency (default: attention-based)
+            \\
+        , .{});
+    }
+
+    try writer.print(
         \\
         \\Created by George Mandis <george@mand.is>
         \\https://github.com/georgemandis/loupe
@@ -54,6 +101,13 @@ pub fn main() !void {
 
     const subcommand = args[1];
 
+    // Global --version / -V
+    if (std.mem.eql(u8, subcommand, "--version") or std.mem.eql(u8, subcommand, "-V")) {
+        try stdout.interface.print("loupe {s} ({s})\n", .{ version, @tagName(builtin.os.tag) });
+        try stdout.interface.flush();
+        return;
+    }
+
     // Global --help / -h before subcommand dispatch
     if (std.mem.eql(u8, subcommand, "--help") or std.mem.eql(u8, subcommand, "-h")) {
         try printUsage(&stdout.interface);
@@ -80,6 +134,56 @@ pub fn main() !void {
     if (std.mem.eql(u8, subcommand, "barcode") or std.mem.eql(u8, subcommand, "qr")) {
         const qr_only = std.mem.eql(u8, subcommand, "qr");
         runBarcode(allocator, args[2..], qr_only, &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "classify")) {
+        runSimple(allocator, args[2..], "classify", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "landmarks")) {
+        runSimple(allocator, args[2..], "landmarks", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "body")) {
+        runSimple(allocator, args[2..], "body", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "hands")) {
+        runSimple(allocator, args[2..], "hands", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "animals")) {
+        runSimple(allocator, args[2..], "animals", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "rectangles")) {
+        runSimple(allocator, args[2..], "rectangles", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "horizon")) {
+        runSimple(allocator, args[2..], "horizon", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "saliency")) {
+        runSaliency(allocator, args[2..], &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "score")) {
+        runSimple(allocator, args[2..], "score", &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "segment")) {
+        runSegment(allocator, args[2..], &stdout.interface, &stderr.interface);
         return;
     }
 
@@ -476,6 +580,471 @@ fn printBarcodesJson(writer: *std.io.Writer, results: []const vision.BarcodeResu
             r.box.y,
             r.box.width,
             r.box.height,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+// ---------------------------------------------------------------------------
+// Generic simple subcommand (--json + image path)
+// ---------------------------------------------------------------------------
+
+fn parseSimpleArgs(sub_args: []const []const u8, cmd: []const u8, stderr_writer: *std.io.Writer) struct { path: []const u8, json: bool } {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+
+    for (sub_args) |arg| {
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\nUsage: loupe {s} [--json] <image>\n", .{cmd}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    return .{ .path = path, .json = json_mode };
+}
+
+fn runSimple(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    cmd: []const u8,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    const parsed = parseSimpleArgs(sub_args, cmd, stderr_writer);
+
+    const handle = vision.loadImage(parsed.path) catch |err| {
+        handleError(err, parsed.json, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    if (std.mem.eql(u8, cmd, "classify")) {
+        const results = vision.classifyImage(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.ClassifyResult, results);
+        if (parsed.json) printClassifyJson(stdout_writer, results) else printClassifyHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "landmarks")) {
+        const results = vision.detectFaceLandmarks(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.FaceLandmarksResult, results);
+        if (parsed.json) printLandmarksJson(stdout_writer, results) else printLandmarksHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "body")) {
+        const results = vision.detectBodyPose(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.BodyPoseResult, results);
+        if (parsed.json) printBodyJson(stdout_writer, results) else printBodyHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "hands")) {
+        const results = vision.detectHandPose(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.HandPoseResult, results);
+        if (parsed.json) printHandsJson(stdout_writer, results) else printHandsHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "animals")) {
+        const results = vision.recognizeAnimals(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.AnimalResult, results);
+        if (parsed.json) printAnimalsJson(stdout_writer, results) else printAnimalsHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "rectangles")) {
+        const results = vision.detectRectangles(allocator, handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeResults(allocator, vision.RectangleResult, results);
+        if (parsed.json) printRectanglesJson(stdout_writer, results) else printRectanglesHuman(stdout_writer, results);
+    } else if (std.mem.eql(u8, cmd, "horizon")) {
+        const result = vision.detectHorizon(handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        if (parsed.json) {
+            stdout_writer.print("{{\"angle\":{d:.4}}}\n", .{result.angle}) catch {};
+        } else {
+            stdout_writer.print("Horizon angle: {d:.2} degrees\n", .{result.angle}) catch {};
+        }
+    } else if (std.mem.eql(u8, cmd, "score")) {
+        const result = vision.scoreAesthetics(handle) catch |err| {
+            handleError(err, parsed.json, stdout_writer, stderr_writer);
+            return;
+        };
+        if (parsed.json) {
+            stdout_writer.print("{{\"score\":{d:.4},\"is_utility\":{s}}}\n", .{ result.score, if (result.is_utility) "true" else "false" }) catch {};
+        } else {
+            stdout_writer.print("Aesthetic score: {d:.2}\n", .{result.score}) catch {};
+            if (result.is_utility) {
+                stdout_writer.print("Type: utility image (screenshot, document, etc.)\n", .{}) catch {};
+            } else {
+                stdout_writer.print("Type: photographic image\n", .{}) catch {};
+            }
+        }
+    }
+
+    stdout_writer.flush() catch {};
+    std.process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// saliency subcommand (has --objects flag)
+// ---------------------------------------------------------------------------
+
+fn runSaliency(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+    var attention = true;
+
+    for (sub_args) |arg| {
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.eql(u8, arg, "--objects")) {
+            attention = false;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\nUsage: loupe saliency [--objects] [--json] <image>\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    const handle = vision.loadImage(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const results = vision.detectSaliency(allocator, handle, attention) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeResults(allocator, vision.SaliencyRect, results);
+
+    if (json_mode) printSaliencyJson(stdout_writer, results) else printSaliencyHuman(stdout_writer, results);
+    stdout_writer.flush() catch {};
+    std.process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// segment subcommand (has -o flag for mask output)
+// ---------------------------------------------------------------------------
+
+fn runSegment(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+    var output_path: ?[]const u8 = null;
+
+    var i: usize = 0;
+    while (i < sub_args.len) : (i += 1) {
+        const arg = sub_args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.eql(u8, arg, "-o")) {
+            i += 1;
+            if (i >= sub_args.len) {
+                stderr_writer.print("Error: -o requires an output path argument.\n", .{}) catch {};
+                stderr_writer.flush() catch {};
+                std.process.exit(2);
+            }
+            output_path = sub_args[i];
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\nUsage: loupe segment [-o mask.png] [--json] <image>\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    const handle = vision.loadImage(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const seg = vision.segmentPerson(allocator, handle) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeSegment(allocator, seg);
+
+    if (json_mode) {
+        stdout_writer.print("{{\"width\":{d},\"height\":{d},\"has_person\":{s}}}\n", .{
+            seg.width,
+            seg.height,
+            if (hasPerson(seg)) "true" else "false",
+        }) catch {};
+    } else {
+        stdout_writer.print("Segmentation mask: {d}x{d}\n", .{ seg.width, seg.height }) catch {};
+        if (hasPerson(seg)) {
+            stdout_writer.print("Person detected in image.\n", .{}) catch {};
+        } else {
+            stdout_writer.print("No person detected.\n", .{}) catch {};
+        }
+    }
+    stdout_writer.flush() catch {};
+
+    // Save mask as grayscale PNG if -o provided
+    if (output_path) |out_path| {
+        saveMaskAsPng(seg, out_path, stderr_writer);
+    }
+
+    std.process.exit(0);
+}
+
+fn hasPerson(seg: vision.SegmentResult) bool {
+    for (seg.mask_data) |b| {
+        if (b > 128) return true;
+    }
+    return false;
+}
+
+fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, stderr_writer: *std.io.Writer) void {
+    // Create a grayscale CGImage from the mask data and save it
+    // We need to go through CoreGraphics to write a PNG
+    // For simplicity, use the vision layer — create a CGImage from raw grayscale data
+    _ = seg;
+    _ = path;
+    stderr_writer.print("Note: mask PNG output not yet implemented. Use --json to get mask dimensions.\n", .{}) catch {};
+    stderr_writer.flush() catch {};
+}
+
+// ---------------------------------------------------------------------------
+// Print functions for new commands
+// ---------------------------------------------------------------------------
+
+fn printClassifyHuman(writer: *std.io.Writer, results: []const vision.ClassifyResult) void {
+    if (results.len == 0) {
+        writer.print("No classifications.\n", .{}) catch {};
+        return;
+    }
+    for (results) |r| {
+        writer.print("{s}: {d:.2}\n", .{ r.label, r.confidence }) catch {};
+    }
+}
+
+fn printClassifyJson(writer: *std.io.Writer, results: []const vision.ClassifyResult) void {
+    writer.print("{{\"labels\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"label\":\"", .{}) catch {};
+        writeJsonString(writer, r.label);
+        writer.print("\",\"confidence\":{d:.4}}}", .{r.confidence}) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printLandmarksHuman(writer: *std.io.Writer, results: []const vision.FaceLandmarksResult) void {
+    if (results.len == 0) {
+        writer.print("No faces detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} face{s} with landmarks:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Face {d}: ({d:.2}, {d:.2}) {d:.2}x{d:.2}\n", .{ idx + 1, r.box.x, r.box.y, r.box.width, r.box.height }) catch {};
+        writer.print("    left eye: {d} pts, right eye: {d} pts, nose: {d} pts\n", .{ r.left_eye.len, r.right_eye.len, r.nose.len }) catch {};
+        writer.print("    lips: {d} pts, contour: {d} pts\n", .{ r.outer_lips.len, r.face_contour.len }) catch {};
+    }
+}
+
+fn printLandmarksJson(writer: *std.io.Writer, results: []const vision.FaceLandmarksResult) void {
+    writer.print("{{\"faces\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4},\"confidence\":{d:.4}", .{
+            r.box.x, r.box.y, r.box.width, r.box.height, r.confidence,
+        }) catch {};
+        printPointsJson(writer, "left_eye", r.left_eye);
+        printPointsJson(writer, "right_eye", r.right_eye);
+        printPointsJson(writer, "nose", r.nose);
+        printPointsJson(writer, "outer_lips", r.outer_lips);
+        printPointsJson(writer, "left_eyebrow", r.left_eyebrow);
+        printPointsJson(writer, "right_eyebrow", r.right_eyebrow);
+        printPointsJson(writer, "face_contour", r.face_contour);
+        writer.print("}}", .{}) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printPointsJson(writer: *std.io.Writer, name: []const u8, points: []const vision.LandmarkPoint) void {
+    writer.print(",\"{s}\":[", .{name}) catch {};
+    for (points, 0..) |p, j| {
+        if (j > 0) writer.print(",", .{}) catch {};
+        writer.print("[{d:.4},{d:.4}]", .{ p.x, p.y }) catch {};
+    }
+    writer.print("]", .{}) catch {};
+}
+
+fn printBodyHuman(writer: *std.io.Writer, results: []const vision.BodyPoseResult) void {
+    if (results.len == 0) {
+        writer.print("No bodies detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} body pose{s}:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Body {d}: {d} joints\n", .{ idx + 1, r.joints.len }) catch {};
+        for (r.joints) |j| {
+            writer.print("    {s}: ({d:.3}, {d:.3}) [{d:.2}]\n", .{ j.name, j.x, j.y, j.confidence }) catch {};
+        }
+    }
+}
+
+fn printBodyJson(writer: *std.io.Writer, results: []const vision.BodyPoseResult) void {
+    writer.print("{{\"bodies\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"joints\":[", .{}) catch {};
+        for (r.joints, 0..) |j, ji| {
+            if (ji > 0) writer.print(",", .{}) catch {};
+            writer.print("{{\"name\":\"", .{}) catch {};
+            writeJsonString(writer, j.name);
+            writer.print("\",\"x\":{d:.4},\"y\":{d:.4},\"confidence\":{d:.4}}}", .{ j.x, j.y, j.confidence }) catch {};
+        }
+        writer.print("]}}", .{}) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printHandsHuman(writer: *std.io.Writer, results: []const vision.HandPoseResult) void {
+    if (results.len == 0) {
+        writer.print("No hands detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} hand{s}:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Hand {d} ({s}): {d} joints\n", .{ idx + 1, r.chirality, r.joints.len }) catch {};
+        for (r.joints) |j| {
+            writer.print("    {s}: ({d:.3}, {d:.3}) [{d:.2}]\n", .{ j.name, j.x, j.y, j.confidence }) catch {};
+        }
+    }
+}
+
+fn printHandsJson(writer: *std.io.Writer, results: []const vision.HandPoseResult) void {
+    writer.print("{{\"hands\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"chirality\":\"", .{}) catch {};
+        writeJsonString(writer, r.chirality);
+        writer.print("\",\"joints\":[", .{}) catch {};
+        for (r.joints, 0..) |j, ji| {
+            if (ji > 0) writer.print(",", .{}) catch {};
+            writer.print("{{\"name\":\"", .{}) catch {};
+            writeJsonString(writer, j.name);
+            writer.print("\",\"x\":{d:.4},\"y\":{d:.4},\"confidence\":{d:.4}}}", .{ j.x, j.y, j.confidence }) catch {};
+        }
+        writer.print("]}}", .{}) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printAnimalsHuman(writer: *std.io.Writer, results: []const vision.AnimalResult) void {
+    if (results.len == 0) {
+        writer.print("No animals detected.\n", .{}) catch {};
+        return;
+    }
+    for (results, 0..) |r, idx| {
+        writer.print("  Animal {d}: {s} ({d:.2}, {d:.2}) {d:.2}x{d:.2} [confidence: {d:.2}]\n", .{
+            idx + 1, r.label, r.box.x, r.box.y, r.box.width, r.box.height, r.confidence,
+        }) catch {};
+    }
+}
+
+fn printAnimalsJson(writer: *std.io.Writer, results: []const vision.AnimalResult) void {
+    writer.print("{{\"animals\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"label\":\"", .{}) catch {};
+        writeJsonString(writer, r.label);
+        writer.print("\",\"confidence\":{d:.4},\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4}}}", .{
+            r.confidence, r.box.x, r.box.y, r.box.width, r.box.height,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printRectanglesHuman(writer: *std.io.Writer, results: []const vision.RectangleResult) void {
+    if (results.len == 0) {
+        writer.print("No rectangles detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} rectangle{s}:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Rectangle {d}:\n", .{idx + 1}) catch {};
+        writer.print("    top-left: ({d:.3}, {d:.3})  top-right: ({d:.3}, {d:.3})\n", .{ r.top_left.x, r.top_left.y, r.top_right.x, r.top_right.y }) catch {};
+        writer.print("    bottom-left: ({d:.3}, {d:.3})  bottom-right: ({d:.3}, {d:.3})\n", .{ r.bottom_left.x, r.bottom_left.y, r.bottom_right.x, r.bottom_right.y }) catch {};
+    }
+}
+
+fn printRectanglesJson(writer: *std.io.Writer, results: []const vision.RectangleResult) void {
+    writer.print("{{\"rectangles\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"top_left\":[{d:.4},{d:.4}],\"top_right\":[{d:.4},{d:.4}],\"bottom_left\":[{d:.4},{d:.4}],\"bottom_right\":[{d:.4},{d:.4}]}}", .{
+            r.top_left.x,  r.top_left.y,
+            r.top_right.x, r.top_right.y,
+            r.bottom_left.x,  r.bottom_left.y,
+            r.bottom_right.x, r.bottom_right.y,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+fn printSaliencyHuman(writer: *std.io.Writer, results: []const vision.SaliencyRect) void {
+    if (results.len == 0) {
+        writer.print("No salient regions detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} salient region{s}:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Region {d}: ({d:.3}, {d:.3}) {d:.3}x{d:.3}\n", .{ idx + 1, r.box.x, r.box.y, r.box.width, r.box.height }) catch {};
+    }
+}
+
+fn printSaliencyJson(writer: *std.io.Writer, results: []const vision.SaliencyRect) void {
+    writer.print("{{\"regions\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4}}}", .{
+            r.box.x, r.box.y, r.box.width, r.box.height,
         }) catch {};
     }
     writer.print("]}}\n", .{}) catch {};

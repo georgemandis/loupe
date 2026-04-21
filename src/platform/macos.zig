@@ -468,6 +468,767 @@ pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError
 }
 
 // ---------------------------------------------------------------------------
+// Classify — VNClassifyImageRequest
+// ---------------------------------------------------------------------------
+
+pub fn classifyImage(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.ClassifyResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNClassifyImageRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.ClassifyResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    // Filter to results with meaningful confidence (> 0.01) and collect up to 20
+    var items = allocator.alloc(vision.ClassifyResult, @min(count, 20)) catch return vision.VisionError.OutOfMemory;
+    var actual: usize = 0;
+
+    for (0..count) |i| {
+        if (actual >= 20) break;
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        const conf = objc.msgSend(f32, obs, objc.sel("confidence"), .{});
+        if (conf < 0.01) continue;
+
+        const ns_id = objc.msgSend(objc.id, obs, objc.sel("identifier"), .{});
+        const c_str = objc.fromNSString(ns_id) orelse continue;
+        const len = std.mem.len(c_str);
+        const label = allocator.alloc(u8, len) catch {
+            for (0..actual) |j| allocator.free(items[j].label);
+            allocator.free(items);
+            return vision.VisionError.OutOfMemory;
+        };
+        @memcpy(label, c_str[0..len]);
+
+        items[actual] = .{ .label = label, .confidence = @floatCast(conf) };
+        actual += 1;
+    }
+
+    if (actual < items.len) {
+        return allocator.realloc(items, actual) catch return vision.VisionError.OutOfMemory;
+    }
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Face Landmarks — VNDetectFaceLandmarksRequest
+// ---------------------------------------------------------------------------
+
+fn copyLandmarkRegion(allocator: Allocator, observation: objc.id, region_sel: objc.SEL, img_width: f64, img_height: f64) ![]vision.LandmarkPoint {
+    const get_region_fn: *const fn (objc.id, objc.SEL) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+    const region = get_region_fn(observation, region_sel) orelse return allocator.alloc(vision.LandmarkPoint, 0);
+
+    const point_count = objc.msgSend(objc.NSUInteger, region, objc.sel("pointCount"), .{});
+    if (point_count == 0) return allocator.alloc(vision.LandmarkPoint, 0);
+
+    // Get normalized points via pointsInImageOfSize:
+    const get_points_fn: *const fn (objc.id, objc.SEL, CGRect) callconv(.c) [*]const CGPoint = @ptrCast(&objc_msgSend);
+    const size = CGRect{ .origin_x = img_width, .origin_y = img_height, .size_width = 0, .size_height = 0 };
+    const points_ptr = get_points_fn(region, objc.sel("pointsInImageOfSize:"), size);
+
+    const out = try allocator.alloc(vision.LandmarkPoint, point_count);
+    for (0..point_count) |j| {
+        out[j] = .{
+            .x = points_ptr[j].x / img_width,
+            .y = 1.0 - (points_ptr[j].y / img_height), // flip Y
+        };
+    }
+    return out;
+}
+
+const CGPoint = extern struct { x: f64, y: f64 };
+
+pub fn detectFaceLandmarks(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.FaceLandmarksResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectFaceLandmarksRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.FaceLandmarksResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const img_w: f64 = @floatFromInt(CGImageGetWidth(image));
+    const img_h: f64 = @floatFromInt(CGImageGetHeight(image));
+
+    const items = allocator.alloc(vision.FaceLandmarksResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        const bbox = getBoundingBox(obs);
+        const confidence = objc.msgSend(f32, obs, objc.sel("confidence"), .{});
+
+        // Get landmarks2D
+        const get_landmarks_fn: *const fn (objc.id, objc.SEL) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+        const landmarks = get_landmarks_fn(obs, objc.sel("landmarks")) orelse {
+            items[i] = .{
+                .box = .{ .x = bbox.origin_x, .y = 1.0 - bbox.origin_y - bbox.size_height, .width = bbox.size_width, .height = bbox.size_height },
+                .confidence = @floatCast(confidence),
+                .left_eye = &.{},
+                .right_eye = &.{},
+                .nose = &.{},
+                .outer_lips = &.{},
+                .left_eyebrow = &.{},
+                .right_eyebrow = &.{},
+                .face_contour = &.{},
+            };
+            continue;
+        };
+
+        items[i] = .{
+            .box = .{ .x = bbox.origin_x, .y = 1.0 - bbox.origin_y - bbox.size_height, .width = bbox.size_width, .height = bbox.size_height },
+            .confidence = @floatCast(confidence),
+            .left_eye = copyLandmarkRegion(allocator, landmarks, objc.sel("leftEye"), img_w, img_h) catch &.{},
+            .right_eye = copyLandmarkRegion(allocator, landmarks, objc.sel("rightEye"), img_w, img_h) catch &.{},
+            .nose = copyLandmarkRegion(allocator, landmarks, objc.sel("nose"), img_w, img_h) catch &.{},
+            .outer_lips = copyLandmarkRegion(allocator, landmarks, objc.sel("outerLips"), img_w, img_h) catch &.{},
+            .left_eyebrow = copyLandmarkRegion(allocator, landmarks, objc.sel("leftEyebrow"), img_w, img_h) catch &.{},
+            .right_eyebrow = copyLandmarkRegion(allocator, landmarks, objc.sel("rightEyebrow"), img_w, img_h) catch &.{},
+            .face_contour = copyLandmarkRegion(allocator, landmarks, objc.sel("faceContour"), img_w, img_h) catch &.{},
+        };
+    }
+
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Body Pose — VNDetectHumanBodyPoseRequest
+// ---------------------------------------------------------------------------
+
+fn extractJoints(allocator: Allocator, observation: objc.id) vision.VisionError![]vision.JointPoint {
+    // Use recognizedPointForJointName:error: for each known joint
+    const joint_names = [_][*:0]const u8{
+        "head_joint",
+        "neck_joint",
+        "left_shoulder_joint",
+        "right_shoulder_joint",
+        "left_elbow_joint",
+        "right_elbow_joint",
+        "left_wrist_joint",
+        "right_wrist_joint",
+        "left_hip_joint",
+        "right_hip_joint",
+        "left_knee_joint",
+        "right_knee_joint",
+        "left_ankle_joint",
+        "right_ankle_joint",
+        "root_joint",
+        "left_ear_joint",
+        "right_ear_joint",
+        "left_eye_joint",
+        "right_eye_joint",
+        "nose_joint",
+    };
+    const display_names = [_][]const u8{
+        "head",
+        "neck",
+        "left_shoulder",
+        "right_shoulder",
+        "left_elbow",
+        "right_elbow",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip",
+        "left_knee",
+        "right_knee",
+        "left_ankle",
+        "right_ankle",
+        "root",
+        "left_ear",
+        "right_ear",
+        "left_eye",
+        "right_eye",
+        "nose",
+    };
+
+    const joints = allocator.alloc(vision.JointPoint, joint_names.len) catch return vision.VisionError.OutOfMemory;
+    var actual: usize = 0;
+
+    const get_point_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+
+    for (joint_names, display_names) |jname, dname| {
+        var err_ptr: ?objc.id = null;
+        const ns_key = objc.nsString(jname);
+        const point_obj = get_point_fn(observation, objc.sel("recognizedPointForJointName:error:"), ns_key, &err_ptr) orelse continue;
+
+        const conf = objc.msgSend(f32, point_obj, objc.sel("confidence"), .{});
+        if (conf < 0.01) continue;
+
+        const get_loc_fn: *const fn (objc.id, objc.SEL) callconv(.c) CGPoint = @ptrCast(&objc_msgSend);
+        const loc = get_loc_fn(point_obj, objc.sel("location"));
+
+        const name = allocator.alloc(u8, dname.len) catch continue;
+        @memcpy(name, dname);
+
+        joints[actual] = .{
+            .name = name,
+            .x = loc.x,
+            .y = 1.0 - loc.y,
+            .confidence = @floatCast(conf),
+        };
+        actual += 1;
+    }
+
+    if (actual < joints.len) {
+        return allocator.realloc(joints, actual) catch return vision.VisionError.OutOfMemory;
+    }
+    return joints;
+}
+
+pub fn detectBodyPose(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.BodyPoseResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectHumanBodyPoseRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.BodyPoseResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.BodyPoseResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        items[i] = .{ .joints = extractJoints(allocator, obs) catch &.{} };
+    }
+
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Hand Pose — VNDetectHumanHandPoseRequest
+// ---------------------------------------------------------------------------
+
+fn extractHandJoints(allocator: Allocator, observation: objc.id) vision.VisionError![]vision.JointPoint {
+    const joint_names = [_][*:0]const u8{
+        "VNHLKW",  // wrist
+        "VNHLKT1", // thumb CMC
+        "VNHLKT2", // thumb MP
+        "VNHLKT3", // thumb IP
+        "VNHLKT4", // thumb tip
+        "VNHLKI1", // index MCP
+        "VNHLKI2", // index PIP
+        "VNHLKI3", // index DIP
+        "VNHLKI4", // index tip
+        "VNHLKM1", // middle MCP
+        "VNHLKM2", // middle PIP
+        "VNHLKM3", // middle DIP
+        "VNHLKM4", // middle tip
+        "VNHLKR1", // ring MCP
+        "VNHLKR2", // ring PIP
+        "VNHLKR3", // ring DIP
+        "VNHLKR4", // ring tip
+        "VNHLKP1", // little MCP
+        "VNHLKP2", // little PIP
+        "VNHLKP3", // little DIP
+        "VNHLKP4", // little tip
+    };
+    const display_names = [_][]const u8{
+        "wrist",
+        "thumb_cmc",      "thumb_mp",      "thumb_ip",      "thumb_tip",
+        "index_mcp",      "index_pip",     "index_dip",     "index_tip",
+        "middle_mcp",     "middle_pip",    "middle_dip",    "middle_tip",
+        "ring_mcp",       "ring_pip",      "ring_dip",      "ring_tip",
+        "little_mcp",     "little_pip",    "little_dip",    "little_tip",
+    };
+
+    const joints = allocator.alloc(vision.JointPoint, joint_names.len) catch return vision.VisionError.OutOfMemory;
+    var actual: usize = 0;
+
+    const get_point_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+
+    for (joint_names, display_names) |jname, dname| {
+        var err_ptr: ?objc.id = null;
+        const ns_key = objc.nsString(jname);
+        const point_obj = get_point_fn(observation, objc.sel("recognizedPointForJointName:error:"), ns_key, &err_ptr) orelse continue;
+
+        const conf = objc.msgSend(f32, point_obj, objc.sel("confidence"), .{});
+        if (conf < 0.01) continue;
+
+        const get_loc_fn: *const fn (objc.id, objc.SEL) callconv(.c) CGPoint = @ptrCast(&objc_msgSend);
+        const loc = get_loc_fn(point_obj, objc.sel("location"));
+
+        const name = allocator.alloc(u8, dname.len) catch continue;
+        @memcpy(name, dname);
+
+        joints[actual] = .{
+            .name = name,
+            .x = loc.x,
+            .y = 1.0 - loc.y,
+            .confidence = @floatCast(conf),
+        };
+        actual += 1;
+    }
+
+    if (actual < joints.len) {
+        return allocator.realloc(joints, actual) catch return vision.VisionError.OutOfMemory;
+    }
+    return joints;
+}
+
+pub fn detectHandPose(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.HandPoseResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectHumanHandPoseRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.HandPoseResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.HandPoseResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+
+        // Get chirality (NSInteger: 0=unknown, 1=left, 2=right)
+        const chirality_int = objc.msgSend(objc.NSInteger, obs, objc.sel("chirality"), .{});
+        const chirality_str: []const u8 = switch (chirality_int) {
+            1 => "left",
+            2 => "right",
+            else => "unknown",
+        };
+        const chirality = allocator.alloc(u8, chirality_str.len) catch return vision.VisionError.OutOfMemory;
+        @memcpy(chirality, chirality_str);
+
+        items[i] = .{
+            .chirality = chirality,
+            .joints = extractHandJoints(allocator, obs) catch &.{},
+        };
+    }
+
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Saliency — VNGenerateAttentionBasedSaliencyImageRequest / ObjectnessBased
+// ---------------------------------------------------------------------------
+
+pub fn detectSaliency(allocator: Allocator, image: ImageHandle, attention: bool) vision.VisionError![]vision.SaliencyRect {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const class_name: [*:0]const u8 = if (attention) "VNGenerateAttentionBasedSaliencyImageRequest" else "VNGenerateObjectnessBasedSaliencyImageRequest";
+    const RequestClass = objc.getClass(class_name) orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const result_count = objc.nsArrayCount(results);
+
+    if (result_count == 0) return allocator.alloc(vision.SaliencyRect, 0) catch return vision.VisionError.OutOfMemory;
+
+    // First result is the saliency observation; get its salientObjects
+    const obs = objc.nsArrayObjectAtIndex(results, 0);
+    const get_objects_fn: *const fn (objc.id, objc.SEL) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+    const salient_objects = get_objects_fn(obs, objc.sel("salientObjects")) orelse
+        return allocator.alloc(vision.SaliencyRect, 0) catch return vision.VisionError.OutOfMemory;
+
+    const count = objc.nsArrayCount(salient_objects);
+    if (count == 0) return allocator.alloc(vision.SaliencyRect, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.SaliencyRect, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const sal_obj = objc.nsArrayObjectAtIndex(salient_objects, i);
+        const bbox = getBoundingBox(sal_obj);
+        items[i] = .{
+            .box = .{
+                .x = bbox.origin_x,
+                .y = 1.0 - bbox.origin_y - bbox.size_height,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+        };
+    }
+
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Horizon — VNDetectHorizonRequest
+// ---------------------------------------------------------------------------
+
+pub fn detectHorizon(image: ImageHandle) vision.VisionError!vision.HorizonResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectHorizonRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return .{ .angle = 0.0 };
+
+    const obs = objc.nsArrayObjectAtIndex(results, 0);
+
+    // angle is a CGFloat property
+    const get_angle_fn: *const fn (objc.id, objc.SEL) callconv(.c) f64 = @ptrCast(&objc_msgSend);
+    const angle = get_angle_fn(obs, objc.sel("angle"));
+
+    // Convert radians to degrees
+    return .{ .angle = angle * (180.0 / std.math.pi) };
+}
+
+// ---------------------------------------------------------------------------
+// Animals — VNRecognizeAnimalsRequest
+// ---------------------------------------------------------------------------
+
+pub fn recognizeAnimals(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.AnimalResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNRecognizeAnimalsRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.AnimalResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.AnimalResult, count) catch return vision.VisionError.OutOfMemory;
+    var actual: usize = 0;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        const bbox = getBoundingBox(obs);
+        const confidence = objc.msgSend(f32, obs, objc.sel("confidence"), .{});
+
+        // VNRecognizedObjectObservation has labels array
+        const labels = objc.msgSend(objc.id, obs, objc.sel("labels"), .{});
+        const label_count = objc.nsArrayCount(labels);
+        if (label_count == 0) continue;
+
+        const top_label = objc.nsArrayObjectAtIndex(labels, 0);
+        const ns_id = objc.msgSend(objc.id, top_label, objc.sel("identifier"), .{});
+        const c_str = objc.fromNSString(ns_id) orelse continue;
+        const len = std.mem.len(c_str);
+        const label = allocator.alloc(u8, len) catch continue;
+        @memcpy(label, c_str[0..len]);
+
+        items[actual] = .{
+            .label = label,
+            .confidence = @floatCast(confidence),
+            .box = .{
+                .x = bbox.origin_x,
+                .y = 1.0 - bbox.origin_y - bbox.size_height,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+        };
+        actual += 1;
+    }
+
+    if (actual < items.len) {
+        return allocator.realloc(items, actual) catch return vision.VisionError.OutOfMemory;
+    }
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Rectangles — VNDetectRectanglesRequest
+// ---------------------------------------------------------------------------
+
+pub fn detectRectangles(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.RectangleResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectRectanglesRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    // Allow multiple rectangles
+    const set_max_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_max_fn(request, objc.sel("setMaximumObservations:"), @as(objc.NSUInteger, 10));
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.RectangleResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.RectangleResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        const bbox = getBoundingBox(obs);
+
+        // Get corner points (normalized CGPoint)
+        const get_point_fn: *const fn (objc.id, objc.SEL) callconv(.c) CGPoint = @ptrCast(&objc_msgSend);
+        const tl = get_point_fn(obs, objc.sel("topLeft"));
+        const tr = get_point_fn(obs, objc.sel("topRight"));
+        const bl = get_point_fn(obs, objc.sel("bottomLeft"));
+        const br = get_point_fn(obs, objc.sel("bottomRight"));
+
+        items[i] = .{
+            .top_left = .{ .x = tl.x, .y = 1.0 - tl.y },
+            .top_right = .{ .x = tr.x, .y = 1.0 - tr.y },
+            .bottom_left = .{ .x = bl.x, .y = 1.0 - bl.y },
+            .bottom_right = .{ .x = br.x, .y = 1.0 - br.y },
+            .box = .{
+                .x = bbox.origin_x,
+                .y = 1.0 - bbox.origin_y - bbox.size_height,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+        };
+    }
+
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Aesthetics — VNCalculateImageAestheticsScoresRequest (macOS 15+)
+// ---------------------------------------------------------------------------
+
+pub fn scoreAesthetics(image: ImageHandle) vision.VisionError!vision.AestheticsResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNCalculateImageAestheticsScoresRequest") orelse return vision.VisionError.UnsupportedPlatform;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return vision.VisionError.DetectionFailed;
+
+    const obs = objc.nsArrayObjectAtIndex(results, 0);
+
+    const get_score_fn: *const fn (objc.id, objc.SEL) callconv(.c) f32 = @ptrCast(&objc_msgSend);
+    const score = get_score_fn(obs, objc.sel("overallScore"));
+
+    const get_util_fn: *const fn (objc.id, objc.SEL) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const is_utility = get_util_fn(obs, objc.sel("isUtility"));
+
+    return .{ .score = @floatCast(score), .is_utility = is_utility };
+}
+
+// ---------------------------------------------------------------------------
+// Person Segmentation — VNGeneratePersonSegmentationRequest
+// ---------------------------------------------------------------------------
+
+extern "c" fn CVPixelBufferGetWidth(pixelBuffer: *anyopaque) usize;
+extern "c" fn CVPixelBufferGetHeight(pixelBuffer: *anyopaque) usize;
+extern "c" fn CVPixelBufferGetBytesPerRow(pixelBuffer: *anyopaque) usize;
+extern "c" fn CVPixelBufferLockBaseAddress(pixelBuffer: *anyopaque, lockFlags: u64) i32;
+extern "c" fn CVPixelBufferUnlockBaseAddress(pixelBuffer: *anyopaque, lockFlags: u64) i32;
+extern "c" fn CVPixelBufferGetBaseAddress(pixelBuffer: *anyopaque) ?[*]u8;
+
+pub fn segmentPerson(allocator: Allocator, image: ImageHandle) vision.VisionError!vision.SegmentResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNGeneratePersonSegmentationRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    // Set quality level to accurate (2)
+    const set_quality_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_quality_fn(request, objc.sel("setQualityLevel:"), @as(objc.NSUInteger, 0)); // 0 = accurate
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return vision.VisionError.DetectionFailed;
+
+    const obs = objc.nsArrayObjectAtIndex(results, 0);
+
+    // Get CVPixelBuffer from observation
+    const pixel_buffer: *anyopaque = objc.msgSend(*anyopaque, obs, objc.sel("pixelBuffer"), .{});
+
+    const width = CVPixelBufferGetWidth(pixel_buffer);
+    const height = CVPixelBufferGetHeight(pixel_buffer);
+    const bytes_per_row = CVPixelBufferGetBytesPerRow(pixel_buffer);
+
+    _ = CVPixelBufferLockBaseAddress(pixel_buffer, 1); // 1 = read-only
+    defer _ = CVPixelBufferUnlockBaseAddress(pixel_buffer, 1);
+
+    const base = CVPixelBufferGetBaseAddress(pixel_buffer) orelse return vision.VisionError.DetectionFailed;
+
+    // Copy mask data (one byte per pixel, grayscale)
+    const mask_data = allocator.alloc(u8, width * height) catch return vision.VisionError.OutOfMemory;
+    for (0..height) |y| {
+        const src_row = base[y * bytes_per_row ..][0..width];
+        const dst_row = mask_data[y * width ..][0..width];
+        @memcpy(dst_row, src_row);
+    }
+
+    return .{
+        .width = width,
+        .height = height,
+        .mask_data = mask_data,
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Blur/Redact helpers
 // ---------------------------------------------------------------------------
 
