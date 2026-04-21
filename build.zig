@@ -45,6 +45,7 @@ pub fn build(b: *std.Build) void {
     }
 
     // Dynamic library (C ABI for FFI consumers)
+    // link_libc required because c_api.zig uses std.heap.c_allocator (malloc/free)
     const lib_dynamic = b.addLibrary(.{
         .name = "loupe",
         .linkage = .dynamic,
@@ -52,6 +53,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "vision", .module = vision_mod },
             },
@@ -67,6 +69,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/c_api.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "vision", .module = vision_mod },
             },
