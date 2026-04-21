@@ -89,6 +89,10 @@ pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) VisionError![]Barc
     return platform.scanBarcodes(allocator, image);
 }
 
+pub fn extractFace(image: ImageHandle, face: FaceResult) VisionError!ImageHandle {
+    return platform.extractFace(image, face);
+}
+
 pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const FaceResult, mode: BlurMode) VisionError!ImageHandle {
     return platform.blurFaces(allocator, image, faces, mode);
 }

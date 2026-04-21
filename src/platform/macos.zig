@@ -518,6 +518,13 @@ fn createBitmapContextWithImage(image: ImageHandle, width: usize, height: usize)
     return .{ .ctx = ctx, .color_space = color_space };
 }
 
+pub fn extractFace(image: ImageHandle, face: vision.FaceResult) vision.VisionError!ImageHandle {
+    const width_f: f64 = @floatFromInt(CGImageGetWidth(image));
+    const height_f: f64 = @floatFromInt(CGImageGetHeight(image));
+    const rect = faceRectToPixels(face, width_f, height_f);
+    return CGImageCreateWithImageInRect(image, rect) orelse return vision.VisionError.DetectionFailed;
+}
+
 pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const vision.FaceResult, mode: vision.BlurMode) vision.VisionError!ImageHandle {
     _ = allocator;
 

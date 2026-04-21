@@ -19,7 +19,7 @@ fn printUsage(writer: *std.io.Writer) !void {
         \\  --help, -h           Show this help message
         \\
         \\Options for 'faces':
-        \\  -o <output>          Write output image to this path
+        \\  -o <output>          Extract detected faces to files (or apply --blur/--redact)
         \\  --blur               Blur detected faces in output image
         \\  --redact             Redact (black box) detected faces in output image
         \\
@@ -168,18 +168,24 @@ fn runFaces(
     }
     stdout_writer.flush() catch {};
 
-    // If blur/redact requested, apply it
-    if (blur_mode) |mode| {
-        const blurred = vision.blurFaces(allocator, handle, faces, mode) catch |err| {
-            handleError(err, json_mode, stdout_writer, stderr_writer);
-            return;
-        };
-        defer vision.freeImage(blurred);
+    // Output handling
+    if (output_path) |out_path| {
+        if (blur_mode) |mode| {
+            // --blur or --redact: apply effect and save single image
+            const blurred = vision.blurFaces(allocator, handle, faces, mode) catch |err| {
+                handleError(err, json_mode, stdout_writer, stderr_writer);
+                return;
+            };
+            defer vision.freeImage(blurred);
 
-        vision.saveImage(blurred, output_path.?) catch |err| {
-            handleError(err, json_mode, stdout_writer, stderr_writer);
-            return;
-        };
+            vision.saveImage(blurred, out_path) catch |err| {
+                handleError(err, json_mode, stdout_writer, stderr_writer);
+                return;
+            };
+        } else {
+            // -o without --blur/--redact: extract each face as a separate image
+            extractFacesToFiles(allocator, handle, faces, out_path, stderr_writer);
+        }
     }
 
     std.process.exit(0);
@@ -204,6 +210,51 @@ fn printFacesHuman(writer: *std.io.Writer, faces: []const vision.FaceResult) voi
             face.box.height,
             face.confidence,
         }) catch {};
+    }
+}
+
+/// Extract each face to a numbered file: "output.png" → "output-1.png", "output-2.png", ...
+/// If there's only one face, uses the path as-is.
+fn extractFacesToFiles(
+    allocator: std.mem.Allocator,
+    image: vision.ImageHandle,
+    faces: []const vision.FaceResult,
+    out_path: []const u8,
+    stderr_writer: *std.io.Writer,
+) void {
+    if (faces.len == 0) return;
+
+    // Split "foo.png" into ("foo", ".png")
+    const dot_pos = std.mem.lastIndexOfScalar(u8, out_path, '.') orelse out_path.len;
+    const stem = out_path[0..dot_pos];
+    const ext = out_path[dot_pos..];
+
+    for (faces, 0..) |face, idx| {
+        const cropped = vision.extractFace(image, face) catch |err| {
+            stderr_writer.print("Error: failed to extract face {d}: {s}\n", .{ idx + 1, @errorName(err) }) catch {};
+            stderr_writer.flush() catch {};
+            continue;
+        };
+        defer vision.freeImage(cropped);
+
+        // Build numbered path (or use as-is for single face)
+        if (faces.len == 1) {
+            vision.saveImage(cropped, out_path) catch |err| {
+                stderr_writer.print("Error: failed to save face: {s}\n", .{@errorName(err)}) catch {};
+                stderr_writer.flush() catch {};
+            };
+        } else {
+            const numbered = std.fmt.allocPrint(allocator, "{s}-{d}{s}", .{ stem, idx + 1, ext }) catch {
+                stderr_writer.print("Error: out of memory.\n", .{}) catch {};
+                stderr_writer.flush() catch {};
+                return;
+            };
+            defer allocator.free(numbered);
+            vision.saveImage(cropped, numbered) catch |err| {
+                stderr_writer.print("Error: failed to save face {d}: {s}\n", .{ idx + 1, @errorName(err) }) catch {};
+                stderr_writer.flush() catch {};
+            };
+        }
     }
 }
 

@@ -895,6 +895,12 @@ pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) vision.VisionError
     return vision.VisionError.UnsupportedPlatform;
 }
 
+pub fn extractFace(image: ImageHandle, face: vision.FaceResult) vision.VisionError!ImageHandle {
+    _ = image;
+    _ = face;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
 pub fn blurFaces(allocator: Allocator, image: ImageHandle, faces: []const vision.FaceResult, mode: vision.BlurMode) vision.VisionError!ImageHandle {
     _ = allocator;
     _ = image;
