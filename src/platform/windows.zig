@@ -1,5 +1,5 @@
 // Windows WinRT backend — COM boilerplate + image loading via BitmapDecoder
-// IIDs are placeholders (zeros) except IID_IAsyncInfo; fill from Windows SDK headers on the VM.
+// IIDs extracted from Windows SDK 10.0.16299.0 headers.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -40,7 +40,7 @@ const BitmapBounds = extern struct {
 pub const ImageHandle = *anyopaque;
 
 // ---------------------------------------------------------------------------
-// IIDs — placeholders (zeros) unless noted
+// IIDs (from Windows SDK 10.0.16299.0 headers)
 // ---------------------------------------------------------------------------
 
 const IID_IAsyncInfo = GUID{
@@ -50,36 +50,40 @@ const IID_IAsyncInfo = GUID{
     .data4 = .{ 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 },
 };
 
-// TODO: Fill in from SDK headers during implementation
-const IID_IStorageFileStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IStorageFile = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IBitmapDecoderStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IBitmapDecoder = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IBitmapFrame = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IBitmapFrameWithSoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_ISoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+// Windows.Storage
+const IID_IStorageFileStatics = GUID{ .data1 = 0x5984C710, .data2 = 0xDAF2, .data3 = 0x43C8, .data4 = .{ 0x8B, 0xB4, 0xA4, 0xD3, 0xEA, 0xCF, 0xD0, 0x3F } };
+const IID_IStorageFile = GUID{ .data1 = 0xFA3F6186, .data2 = 0x4214, .data3 = 0x428C, .data4 = .{ 0xA6, 0x4C, 0x14, 0xC9, 0xAC, 0x73, 0x15, 0xEA } };
 
-const IID_IFaceDetectorStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IFaceDetector = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IDetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+// Windows.Graphics.Imaging
+const IID_IBitmapDecoderStatics = GUID{ .data1 = 0x438CCB26, .data2 = 0xBCEF, .data3 = 0x4E95, .data4 = .{ 0xBA, 0xD6, 0x23, 0xA8, 0x22, 0xE5, 0x8D, 0x01 } };
+const IID_IBitmapDecoder = GUID{ .data1 = 0xACEF22BA, .data2 = 0x1D74, .data3 = 0x4C91, .data4 = .{ 0x9D, 0xFC, 0x96, 0x20, 0x74, 0x52, 0x33, 0xE6 } };
+const IID_IBitmapFrame = GUID{ .data1 = 0x72A49A1C, .data2 = 0x8081, .data3 = 0x438D, .data4 = .{ 0x91, 0xBC, 0x94, 0xEC, 0xFC, 0x81, 0x85, 0xC6 } };
+const IID_IBitmapFrameWithSoftwareBitmap = GUID{ .data1 = 0xFE287C9A, .data2 = 0x420C, .data3 = 0x4963, .data4 = .{ 0x87, 0xAD, 0x69, 0x14, 0x36, 0xE0, 0x83, 0x83 } };
+const IID_ISoftwareBitmap = GUID{ .data1 = 0x689E0708, .data2 = 0x7EEF, .data3 = 0x483F, .data4 = .{ 0x96, 0x3F, 0xDA, 0x93, 0x88, 0x18, 0xE0, 0x73 } };
+const IID_ISoftwareBitmapStatics = GUID{ .data1 = 0xDF0385DB, .data2 = 0x672F, .data3 = 0x4A9D, .data4 = .{ 0x80, 0x6E, 0xC2, 0x44, 0x2F, 0x34, 0x3E, 0x86 } };
 
-const IID_IOcrEngineStatics = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IOcrEngine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IOcrResult = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IOcrLine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+// Windows.Media.FaceAnalysis
+const IID_IFaceDetectorStatics = GUID{ .data1 = 0xBC042D67, .data2 = 0x9047, .data3 = 0x33F6, .data4 = .{ 0x88, 0x1B, 0x67, 0x46, 0xC1, 0xB2, 0x18, 0xB8 } };
+const IID_IFaceDetector = GUID{ .data1 = 0x16B672DC, .data2 = 0xFE6F, .data3 = 0x3117, .data4 = .{ 0x8D, 0x95, 0xC3, 0xF0, 0x4D, 0x51, 0x63, 0x0C } };
+const IID_IDetectedFace = GUID{ .data1 = 0x8200D454, .data2 = 0x66BC, .data3 = 0x34DF, .data4 = .{ 0x94, 0x10, 0xE8, 0x94, 0x00, 0x19, 0x54, 0x14 } };
+
+// Windows.Media.Ocr
+const IID_IOcrEngineStatics = GUID{ .data1 = 0x5BFFA85A, .data2 = 0x3384, .data3 = 0x3540, .data4 = .{ 0x99, 0x40, 0x69, 0x91, 0x20, 0xD4, 0x28, 0xA8 } };
+const IID_IOcrEngine = GUID{ .data1 = 0x5A14BC41, .data2 = 0x5B76, .data3 = 0x3140, .data4 = .{ 0xB6, 0x80, 0x88, 0x25, 0x56, 0x26, 0x83, 0xAC } };
+const IID_IOcrResult = GUID{ .data1 = 0x9BD235B2, .data2 = 0x175B, .data3 = 0x3D6A, .data4 = .{ 0x92, 0xE2, 0x38, 0x8C, 0x20, 0x6E, 0x2F, 0x63 } };
+const IID_IOcrLine = GUID{ .data1 = 0x0043A16F, .data2 = 0xE31F, .data3 = 0x3A24, .data4 = .{ 0x89, 0x9C, 0xD4, 0x44, 0xBD, 0x08, 0x81, 0x24 } };
 
 // Parameterized type IIDs (IAsyncOperation<T>, IVectorView<T>)
-// These are SHA1 hashes — look for __FIAsyncOperation_1_xxx in the headers
-const IID_IAsyncOp_StorageFile = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_IRandomAccessStream = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_BitmapDecoder = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_SoftwareBitmap = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_FaceDetector = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_OcrResult = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_VectorView_DetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IAsyncOp_BitmapFrame = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IVectorView_DetectedFace = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
-const IID_IVectorView_OcrLine = GUID{ .data1 = 0, .data2 = 0, .data3 = 0, .data4 = .{ 0, 0, 0, 0, 0, 0, 0, 0 } };
+const IID_IAsyncOp_StorageFile = GUID{ .data1 = 0x5e52f8ce, .data2 = 0xaced, .data3 = 0x5a42, .data4 = .{ 0x95, 0xb4, 0xf6, 0x74, 0xdd, 0x84, 0x88, 0x5e } };
+const IID_IAsyncOp_IRandomAccessStream = GUID{ .data1 = 0x430ecece, .data2 = 0x1418, .data3 = 0x5d19, .data4 = .{ 0x81, 0xb2, 0x5d, 0xdb, 0x38, 0x16, 0x03, 0xcc } };
+const IID_IAsyncOp_BitmapDecoder = GUID{ .data1 = 0xaa94d8e9, .data2 = 0xcaef, .data3 = 0x53f6, .data4 = .{ 0x82, 0x3d, 0x91, 0xb6, 0xe8, 0x34, 0x05, 0x10 } };
+const IID_IAsyncOp_SoftwareBitmap = GUID{ .data1 = 0xc4a10980, .data2 = 0x714b, .data3 = 0x5501, .data4 = .{ 0x8d, 0xa2, 0xdb, 0xda, 0xcc, 0xe7, 0x0f, 0x73 } };
+const IID_IAsyncOp_FaceDetector = GUID{ .data1 = 0xc0141cd2, .data2 = 0x7a65, .data3 = 0x514c, .data4 = .{ 0xbf, 0xc4, 0xb4, 0x9e, 0x99, 0x1f, 0x03, 0xeb } };
+const IID_IAsyncOp_OcrResult = GUID{ .data1 = 0xc7d7118e, .data2 = 0xae36, .data3 = 0x59c0, .data4 = .{ 0xac, 0x76, 0x7b, 0xad, 0xee, 0x71, 0x1c, 0x8b } };
+const IID_IAsyncOp_Vector_DetectedFace = GUID{ .data1 = 0x37f1d7dc, .data2 = 0xa1a4, .data3 = 0x5a94, .data4 = .{ 0xb3, 0x3b, 0x74, 0x20, 0x5a, 0x65, 0xa1, 0xed } };
+const IID_IAsyncOp_BitmapFrame = GUID{ .data1 = 0xcb1483d1, .data2 = 0x1464, .data3 = 0x5bf9, .data4 = .{ 0x93, 0x46, 0xd5, 0x37, 0x73, 0x5d, 0xfb, 0xd6 } };
+const IID_IVectorView_DetectedFace = GUID{ .data1 = 0x39ef4411, .data2 = 0x0618, .data3 = 0x5b8d, .data4 = .{ 0x8e, 0xa2, 0x81, 0xc6, 0x37, 0xf8, 0x23, 0xf8 } };
+const IID_IVectorView_OcrLine = GUID{ .data1 = 0x60c76eac, .data2 = 0x8875, .data3 = 0x5ddb, .data4 = .{ 0xa1, 0x9b, 0x65, 0xa3, 0x93, 0x62, 0x79, 0xea } };
 
 // ---------------------------------------------------------------------------
 // COM vtable structs
@@ -173,6 +177,7 @@ const IStorageFileVtbl = extern struct {
     MoveOverloadDefaultNameAndOptions: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     MoveOverloadDefaultOptions: *const fn (*anyopaque, *anyopaque, HSTRING, *?*anyopaque) callconv(.c) HRESULT,
     MoveOverload: *const fn (*anyopaque, *anyopaque, HSTRING, i32, *?*anyopaque) callconv(.c) HRESULT,
+    MoveAndReplaceAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
 
 // IBitmapDecoderStatics — CreateAsync(stream)
@@ -190,6 +195,7 @@ const IBitmapDecoderStaticsVtbl = extern struct {
     get_GifDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
     get_JpegXRDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
     get_IcoDecoderId: *const fn (*anyopaque, *GUID) callconv(.c) HRESULT,
+    GetDecoderInformationEnumerator: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     CreateAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     CreateWithIdAsync: *const fn (*anyopaque, GUID, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
 };
@@ -245,6 +251,19 @@ const IBitmapFrameWithSoftwareBitmapVtbl = extern struct {
     GetSoftwareBitmapTransformedAsync: *const fn (*anyopaque, i32, i32, *anyopaque, i32, *?*anyopaque) callconv(.c) HRESULT,
 };
 
+// ISoftwareBitmapStatics — Copy, Convert, ConvertWithAlpha
+const ISoftwareBitmapStaticsVtbl = extern struct {
+    QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
+    AddRef: *const fn (*anyopaque) callconv(.c) u32,
+    Release: *const fn (*anyopaque) callconv(.c) u32,
+    GetIids: *const fn (*anyopaque, *u32, *?[*]GUID) callconv(.c) HRESULT,
+    GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
+    GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
+    Copy: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
+    Convert: *const fn (*anyopaque, *anyopaque, i32, *?*anyopaque) callconv(.c) HRESULT,
+    ConvertWithAlpha: *const fn (*anyopaque, *anyopaque, i32, i32, *?*anyopaque) callconv(.c) HRESULT,
+};
+
 // IFaceDetectorStatics — CreateAsync
 const IFaceDetectorStaticsVtbl = extern struct {
     QueryInterface: *const fn (*anyopaque, *const GUID, *?*anyopaque) callconv(.c) HRESULT,
@@ -256,6 +275,7 @@ const IFaceDetectorStaticsVtbl = extern struct {
     CreateAsync: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     GetSupportedBitmapPixelFormats: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     IsBitmapPixelFormatSupported: *const fn (*anyopaque, i32, *bool) callconv(.c) HRESULT,
+    get_IsSupported: *const fn (*anyopaque, *bool) callconv(.c) HRESULT,
 };
 
 // IFaceDetector — DetectFacesAsync
@@ -268,6 +288,10 @@ const IFaceDetectorVtbl = extern struct {
     GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     DetectFacesAsync: *const fn (*anyopaque, *anyopaque, *?*anyopaque) callconv(.c) HRESULT,
     DetectFacesWithSearchAreaAsync: *const fn (*anyopaque, *anyopaque, BitmapBounds, *?*anyopaque) callconv(.c) HRESULT,
+    get_MinDetectableFaceSize: *const fn (*anyopaque, *u64) callconv(.c) HRESULT,
+    put_MinDetectableFaceSize: *const fn (*anyopaque, u64) callconv(.c) HRESULT,
+    get_MaxDetectableFaceSize: *const fn (*anyopaque, *u64) callconv(.c) HRESULT,
+    put_MaxDetectableFaceSize: *const fn (*anyopaque, u64) callconv(.c) HRESULT,
 };
 
 // IDetectedFace — get_FaceBox
@@ -317,8 +341,8 @@ const IOcrResultVtbl = extern struct {
     GetRuntimeClassName: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
     GetTrustLevel: *const fn (*anyopaque, *i32) callconv(.c) HRESULT,
     get_Lines: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
-    get_Text: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
     get_TextAngle: *const fn (*anyopaque, *?*anyopaque) callconv(.c) HRESULT,
+    get_Text: *const fn (*anyopaque, *HSTRING) callconv(.c) HRESULT,
 };
 
 // IOcrLine — get_Words, get_Text
@@ -390,6 +414,7 @@ extern "api-ms-win-core-winrt-string-l1-1-0" fn WindowsGetStringRawBuffer(
 
 const STORAGE_FILE_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Storage.StorageFile");
 const BITMAP_DECODER_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Graphics.Imaging.BitmapDecoder");
+const SOFTWARE_BITMAP_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Graphics.Imaging.SoftwareBitmap");
 const FACE_DETECTOR_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Media.FaceAnalysis.FaceDetector");
 const OCR_ENGINE_CLASS = std.unicode.utf8ToUtf16LeStringLiteral("Windows.Media.Ocr.OcrEngine");
 
@@ -663,11 +688,31 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
         return vision.VisionError.DetectionFailed;
     defer comRelease(fd_iface);
 
-    // 4. DetectFacesAsync(bitmap)
-    // NOTE: May need to convert bitmap to Gray8 first. Check IsBitmapPixelFormatSupported.
+    // 4. Convert bitmap to Gray8 — FaceDetector requires Gray8 or Nv12 pixel format.
+    //    The loaded SoftwareBitmap is typically Bgra8 which FaceDetector rejects.
+    var sb_class_hs: HSTRING = null;
+    if (WindowsCreateString(SOFTWARE_BITMAP_CLASS, SOFTWARE_BITMAP_CLASS.len, &sb_class_hs) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    defer _ = WindowsDeleteString(sb_class_hs);
+
+    var sb_factory_ptr: ?*anyopaque = null;
+    if (RoGetActivationFactory(sb_class_hs, &IID_ISoftwareBitmapStatics, &sb_factory_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const sb_factory = sb_factory_ptr.?;
+    defer comRelease(sb_factory);
+
+    const sb_vt = vtable_(ISoftwareBitmapStaticsVtbl, sb_factory);
+    var gray_bitmap_ptr: ?*anyopaque = null;
+    // BitmapPixelFormat.Gray8 = 62
+    if (sb_vt.Convert(sb_factory, data.bitmap, 62, &gray_bitmap_ptr) != S_OK)
+        return vision.VisionError.DetectionFailed;
+    const gray_bitmap = gray_bitmap_ptr.?;
+    defer comRelease(gray_bitmap);
+
+    // 5. DetectFacesAsync(gray_bitmap)
     const fd_vt = vtable_(IFaceDetectorVtbl, fd_iface);
     var detect_async_ptr: ?*anyopaque = null;
-    if (fd_vt.DetectFacesAsync(fd_iface, data.bitmap, &detect_async_ptr) != S_OK)
+    if (fd_vt.DetectFacesAsync(fd_iface, gray_bitmap, &detect_async_ptr) != S_OK)
         return vision.VisionError.DetectionFailed;
     const detect_async = detect_async_ptr.?;
     defer comRelease(detect_async);
@@ -675,18 +720,16 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
     const detect_status = try waitForAsync(detect_async, 30000);
     if (detect_status != .Completed) return vision.VisionError.DetectionFailed;
 
-    // 5. Get IVectorView<DetectedFace>
-    // DetectFacesAsync returns IAsyncOperation<IVectorView<DetectedFace>>
-    const faces_vector = try getAsyncResult(detect_async, &IID_IAsyncOp_VectorView_DetectedFace);
+    // 6. Get IVector<DetectedFace> from async result, then QI to IVectorView for read access
+    // DetectFacesAsync returns IAsyncOperation<IVector<DetectedFace>>
+    const faces_vector = try getAsyncResult(detect_async, &IID_IAsyncOp_Vector_DetectedFace);
     defer comRelease(faces_vector);
 
-    const vec_iface = queryInterface(faces_vector, &IID_IVectorView_DetectedFace) orelse
-        return vision.VisionError.DetectionFailed;
-    defer comRelease(vec_iface);
-
-    const vec_vt = vtable_(IVectorViewVtbl, vec_iface);
+    // IVector has GetAt (slot 6) and get_Size (slot 7) — same layout as IVectorView,
+    // so we can use IVectorViewVtbl directly without QI.
+    const vec_vt = vtable_(IVectorViewVtbl, faces_vector);
     var count: u32 = 0;
-    if (vec_vt.get_Size(vec_iface, &count) != S_OK)
+    if (vec_vt.get_Size(faces_vector, &count) != S_OK)
         return vision.VisionError.DetectionFailed;
 
     if (count == 0) {
@@ -699,7 +742,7 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
 
     for (0..count) |i| {
         var face_ptr: ?*anyopaque = null;
-        if (vec_vt.GetAt(vec_iface, @intCast(i), &face_ptr) != S_OK) continue;
+        if (vec_vt.GetAt(faces_vector, @intCast(i), &face_ptr) != S_OK) continue;
         const face_obj = face_ptr.?;
         defer comRelease(face_obj);
 
