@@ -89,7 +89,8 @@ pub fn main(init: std.process.Init) !void {
     // Collect args into a slice for indexed access
     var args_list: std.ArrayList([:0]const u8) = .empty;
     defer args_list.deinit(allocator);
-    var args_iter = init.minimal.args.iterate();
+    var args_iter = try std.process.Args.iterateAllocator(init.minimal.args, allocator);
+    defer args_iter.deinit();
     while (args_iter.next()) |arg| {
         try args_list.append(allocator, arg);
     }

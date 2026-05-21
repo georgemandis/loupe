@@ -428,20 +428,21 @@ fn waitForAsync(async_obj: *anyopaque, timeout_ms: u32) vision.VisionError!Async
     defer comRelease(info);
 
     const info_vt = vtable_(IAsyncInfoVtbl, info);
-    const timeout_ns: i128 = @as(i128, timeout_ms) * std.time.ns_per_ms;
-    const start: i128 = std.time.nanoTimestamp();
+    // Poll with ~50ms yield intervals; max_polls approximates timeout_ms
+    const poll_interval_ms: u32 = 50;
+    const max_polls: u32 = if (timeout_ms > poll_interval_ms) timeout_ms / poll_interval_ms else 1;
+    var polls: u32 = 0;
 
-    while (true) {
+    while (polls < max_polls) : (polls += 1) {
         var status: AsyncStatus = .Started;
         if (info_vt.get_Status(info, &status) != S_OK)
             return vision.VisionError.DetectionFailed;
         if (status != .Started) return status;
 
-        const now: i128 = std.time.nanoTimestamp();
-        if (now - start >= timeout_ns) return vision.VisionError.DetectionFailed;
-
-        std.Thread.sleep(50 * std.time.ns_per_ms);
+        // Yield to OS scheduler; on Windows this is effectively a brief sleep
+        std.Thread.yield() catch {};
     }
+    return vision.VisionError.DetectionFailed;
 }
 
 /// Get async result as *anyopaque. Caller must comRelease.
