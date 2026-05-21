@@ -21,7 +21,7 @@ scoop install loupe
 
 ### From source
 
-Requires [Zig 0.15+](https://ziglang.org/download/).
+Requires [Zig 0.16+](https://ziglang.org/download/).
 
 ```bash
 git clone https://github.com/georgemandis/loupe.git
@@ -99,6 +99,7 @@ loupe saliency photo.jpg       # find visually salient regions
 loupe saliency --objects img.jpg # objectness-based saliency
 loupe score photo.jpg          # aesthetic quality score (macOS 15+)
 loupe segment photo.jpg        # person segmentation mask
+loupe segment -o mask.png photo.jpg  # save mask as grayscale PNG
 ```
 
 All commands support `--json` for machine-readable output.
@@ -124,6 +125,22 @@ All commands support `--json` for machine-readable output.
 | Person segmentation | Yes | - |
 
 The macOS build uses the Vision framework. The Windows build uses WinRT (face detection and OCR). Commands not available on your platform are hidden from `--help`.
+
+## Shell completions
+
+```bash
+# Fish
+loupe completions fish | source
+# Persist: loupe completions fish > ~/.config/fish/completions/loupe.fish
+
+# Bash
+eval "$(loupe completions bash)"
+
+# Zsh
+loupe completions zsh | source /dev/stdin
+```
+
+Installed automatically via Homebrew.
 
 ## C ABI
 

@@ -167,28 +167,53 @@ pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
     if (!ok) return vision.VisionError.SaveFailed;
 }
 
-pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8) vision.VisionError!void {
-    // Step 1: create grayscale color space
-    const color_space = CGColorSpaceCreateDeviceGray() orelse return vision.VisionError.SaveFailed;
-    defer CGColorSpaceRelease(color_space);
+pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, source_image: ImageHandle) vision.VisionError!void {
+    // Step 1: create grayscale CGImage from raw mask data
+    const gray_space = CGColorSpaceCreateDeviceGray() orelse return vision.VisionError.SaveFailed;
+    defer CGColorSpaceRelease(gray_space);
 
-    // Step 2: create bitmap context from mask data
-    const ctx = CGBitmapContextCreate(
+    const mask_ctx = CGBitmapContextCreate(
         @constCast(@ptrCast(seg.mask_data.ptr)),
         seg.width,
         seg.height,
-        8, // bits per component
-        seg.width, // bytes per row (1 byte per pixel for grayscale)
-        color_space,
+        8,
+        seg.width,
+        gray_space,
         kCGImageAlphaNone,
     ) orelse return vision.VisionError.SaveFailed;
-    defer CGContextRelease(ctx);
+    defer CGContextRelease(mask_ctx);
 
-    // Step 3: create CGImage from bitmap context
-    const cg_image = CGBitmapContextCreateImage(ctx) orelse return vision.VisionError.SaveFailed;
-    defer CGImageRelease(cg_image);
+    const mask_image = CGBitmapContextCreateImage(mask_ctx) orelse return vision.VisionError.SaveFailed;
+    defer CGImageRelease(mask_image);
 
-    // Step 4: save via CGImageDestination (reuse saveImage pattern)
+    // Step 2: get source image dimensions and draw mask scaled to match
+    const src_w = CGImageGetWidth(source_image);
+    const src_h = CGImageGetHeight(source_image);
+
+    const out_ctx = CGBitmapContextCreate(
+        null,
+        src_w,
+        src_h,
+        8,
+        src_w,
+        gray_space,
+        kCGImageAlphaNone,
+    ) orelse return vision.VisionError.SaveFailed;
+    defer CGContextRelease(out_ctx);
+
+    // Draw mask image scaled into the output context
+    const dst_rect = CGRect{
+        .origin_x = 0,
+        .origin_y = 0,
+        .size_width = @floatFromInt(src_w),
+        .size_height = @floatFromInt(src_h),
+    };
+    CGContextDrawImage(out_ctx, dst_rect, mask_image);
+
+    const final_image = CGBitmapContextCreateImage(out_ctx) orelse return vision.VisionError.SaveFailed;
+    defer CGImageRelease(final_image);
+
+    // Step 3: save via CGImageDestination
     const url = cfURLFromPath(path) orelse return vision.VisionError.SaveFailed;
     defer CFRelease(url);
 
@@ -198,7 +223,7 @@ pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8) vision.VisionE
     const dest = CGImageDestinationCreateWithURL(url, uti, 1, null) orelse return vision.VisionError.SaveFailed;
     defer CFRelease(dest);
 
-    CGImageDestinationAddImage(dest, cg_image, null);
+    CGImageDestinationAddImage(dest, final_image, null);
 
     const ok = CGImageDestinationFinalize(dest);
     if (!ok) return vision.VisionError.SaveFailed;

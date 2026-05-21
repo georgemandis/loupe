@@ -208,8 +208,8 @@ pub fn segmentPerson(allocator: Allocator, image: ImageHandle) VisionError!Segme
     return platform.segmentPerson(allocator, image);
 }
 
-pub fn saveMaskAsPng(seg: SegmentResult, path: []const u8) VisionError!void {
-    return platform.saveMaskAsPng(seg, path);
+pub fn saveMaskAsPng(seg: SegmentResult, path: []const u8, source_image: ImageHandle) VisionError!void {
+    return platform.saveMaskAsPng(seg, path, source_image);
 }
 
 pub fn saveImage(image: ImageHandle, path: []const u8) VisionError!void {
