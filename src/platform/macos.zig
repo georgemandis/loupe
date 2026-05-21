@@ -50,6 +50,7 @@ extern "c" fn CGContextSetRGBFillColor(context: *anyopaque, r: f64, g: f64, b: f
 extern "c" fn CGContextFillRect(context: *anyopaque, rect: CGRect) void;
 extern "c" fn CGContextRelease(context: *anyopaque) void;
 extern "c" fn CGColorSpaceCreateDeviceRGB() ?*anyopaque;
+extern "c" fn CGColorSpaceCreateDeviceGray() ?*anyopaque;
 extern "c" fn CGColorSpaceRelease(space: *anyopaque) void;
 extern "c" fn CGImageCreateWithImageInRect(image: *anyopaque, rect: CGRect) ?*anyopaque;
 
@@ -75,6 +76,7 @@ extern "c" fn CGImageDestinationFinalize(dest: *anyopaque) bool;
 const kCFStringEncodingUTF8: u32 = 0x08000100;
 const kCFURLPOSIXPathStyle: i64 = 0;
 const kCGImageAlphaPremultipliedLast: u32 = 1;
+const kCGImageAlphaNone: u32 = 0;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -161,6 +163,43 @@ pub fn saveImage(image: ImageHandle, path: []const u8) vision.VisionError!void {
     CGImageDestinationAddImage(dest, image, null);
 
     // Step 6: finalize (flush to disk)
+    const ok = CGImageDestinationFinalize(dest);
+    if (!ok) return vision.VisionError.SaveFailed;
+}
+
+pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8) vision.VisionError!void {
+    // Step 1: create grayscale color space
+    const color_space = CGColorSpaceCreateDeviceGray() orelse return vision.VisionError.SaveFailed;
+    defer CGColorSpaceRelease(color_space);
+
+    // Step 2: create bitmap context from mask data
+    const ctx = CGBitmapContextCreate(
+        @constCast(@ptrCast(seg.mask_data.ptr)),
+        seg.width,
+        seg.height,
+        8, // bits per component
+        seg.width, // bytes per row (1 byte per pixel for grayscale)
+        color_space,
+        kCGImageAlphaNone,
+    ) orelse return vision.VisionError.SaveFailed;
+    defer CGContextRelease(ctx);
+
+    // Step 3: create CGImage from bitmap context
+    const cg_image = CGBitmapContextCreateImage(ctx) orelse return vision.VisionError.SaveFailed;
+    defer CGImageRelease(cg_image);
+
+    // Step 4: save via CGImageDestination (reuse saveImage pattern)
+    const url = cfURLFromPath(path) orelse return vision.VisionError.SaveFailed;
+    defer CFRelease(url);
+
+    const uti = cfStringFromBytes("public.png") orelse return vision.VisionError.SaveFailed;
+    defer CFRelease(uti);
+
+    const dest = CGImageDestinationCreateWithURL(url, uti, 1, null) orelse return vision.VisionError.SaveFailed;
+    defer CFRelease(dest);
+
+    CGImageDestinationAddImage(dest, cg_image, null);
+
     const ok = CGImageDestinationFinalize(dest);
     if (!ok) return vision.VisionError.SaveFailed;
 }

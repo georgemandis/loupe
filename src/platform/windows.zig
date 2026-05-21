@@ -967,3 +967,9 @@ pub fn segmentPerson(allocator: Allocator, image: ImageHandle) vision.VisionErro
     _ = image;
     return vision.VisionError.UnsupportedPlatform;
 }
+
+pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8) vision.VisionError!void {
+    _ = seg;
+    _ = path;
+    return vision.VisionError.UnsupportedPlatform;
+}

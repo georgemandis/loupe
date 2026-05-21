@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.2.0";
+const version = "0.3.0";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.io.Writer) !void {
@@ -43,6 +43,7 @@ fn printUsage(writer: *std.io.Writer) !void {
     }
 
     try writer.print(
+        \\  completions Print shell completions (fish, bash, zsh)
         \\  help       Show this help message
         \\
         \\Global options:
@@ -112,6 +113,11 @@ pub fn main() !void {
     if (std.mem.eql(u8, subcommand, "--help") or std.mem.eql(u8, subcommand, "-h")) {
         try printUsage(&stdout.interface);
         try stdout.interface.flush();
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "completions")) {
+        runCompletions(args[2..], &stdout.interface, &stderr.interface);
         return;
     }
 
@@ -838,14 +844,203 @@ fn hasPerson(seg: vision.SegmentResult) bool {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// completions subcommand
+// ---------------------------------------------------------------------------
+
+fn runCompletions(
+    sub_args: []const []const u8,
+    stdout_writer: *std.io.Writer,
+    stderr_writer: *std.io.Writer,
+) void {
+    const shell = if (sub_args.len > 0) sub_args[0] else {
+        stderr_writer.print("Usage: loupe completions <fish|bash|zsh>\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(1);
+    };
+
+    const output = if (std.mem.eql(u8, shell, "fish"))
+        fish_completions
+    else if (std.mem.eql(u8, shell, "bash"))
+        bash_completions
+    else if (std.mem.eql(u8, shell, "zsh"))
+        zsh_completions
+    else {
+        stderr_writer.print("Unknown shell: {s}. Supported: fish, bash, zsh\n", .{shell}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(1);
+    };
+
+    stdout_writer.print("{s}", .{output}) catch {};
+    stdout_writer.flush() catch {};
+    std.process.exit(0);
+}
+
+const fish_completions =
+    \\# loupe completions for fish
+    \\# Install: loupe completions fish | source
+    \\# Persist: loupe completions fish > ~/.config/fish/completions/loupe.fish
+    \\
+    \\complete -e -c loupe
+    \\complete -c loupe -f
+    \\complete -c loupe -n "__fish_use_subcommand" -a "faces" -d "Detect faces in an image"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "ocr" -d "Recognize text in an image"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "barcode" -d "Scan barcodes in an image"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "qr" -d "Scan QR codes in an image"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "landmarks" -d "Detect facial landmarks"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "classify" -d "Classify image content"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "body" -d "Detect human body pose"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "hands" -d "Detect hand pose"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "animals" -d "Detect animals"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "rectangles" -d "Detect rectangular shapes"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "horizon" -d "Measure horizon tilt angle"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "saliency" -d "Find visually salient regions"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "score" -d "Rate image aesthetic quality"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "segment" -d "Generate person segmentation mask"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "completions" -d "Print shell completions"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "help" -d "Show help"
+    \\complete -c loupe -l json -d "Output as JSON"
+    \\complete -c loupe -l help -s h -d "Show help"
+    \\complete -c loupe -l version -s V -d "Show version"
+    \\
+    \\# faces options
+    \\complete -c loupe -n "__fish_seen_subcommand_from faces" -s o -r -d "Output path"
+    \\complete -c loupe -n "__fish_seen_subcommand_from faces" -l blur -d "Blur detected faces"
+    \\complete -c loupe -n "__fish_seen_subcommand_from faces" -l redact -d "Redact detected faces"
+    \\
+    \\# segment options
+    \\complete -c loupe -n "__fish_seen_subcommand_from segment" -s o -r -d "Save mask as PNG"
+    \\
+    \\# saliency options
+    \\complete -c loupe -n "__fish_seen_subcommand_from saliency" -l objects -d "Use objectness-based saliency"
+    \\
+    \\# completions: shell name
+    \\complete -c loupe -n "__fish_seen_subcommand_from completions" -a "fish bash zsh"
+    \\
+;
+
+const bash_completions =
+    \\# loupe completions for bash
+    \\# Install: eval "$(loupe completions bash)"
+    \\# Persist: loupe completions bash > /etc/bash_completion.d/loupe
+    \\
+    \\_loupe() {
+    \\    local cur prev words cword
+    \\    _init_completion || return
+    \\
+    \\    local commands="faces ocr barcode qr landmarks classify body hands animals rectangles horizon saliency score segment completions help"
+    \\
+    \\    if [[ $cword -eq 1 ]]; then
+    \\        COMPREPLY=($(compgen -W "$commands --json --help -h --version -V" -- "$cur"))
+    \\        return
+    \\    fi
+    \\
+    \\    local cmd="${words[1]}"
+    \\
+    \\    case "$cmd" in
+    \\        faces)
+    \\            COMPREPLY=($(compgen -W "-o --blur --redact --json" -- "$cur"))
+    \\            ;;
+    \\        segment)
+    \\            COMPREPLY=($(compgen -W "-o --json" -- "$cur"))
+    \\            ;;
+    \\        saliency)
+    \\            COMPREPLY=($(compgen -W "--objects --json" -- "$cur"))
+    \\            ;;
+    \\        ocr|barcode|qr|landmarks|classify|body|hands|animals|rectangles|horizon|score)
+    \\            COMPREPLY=($(compgen -W "--json" -- "$cur"))
+    \\            ;;
+    \\        completions)
+    \\            COMPREPLY=($(compgen -W "fish bash zsh" -- "$cur"))
+    \\            ;;
+    \\    esac
+    \\}
+    \\complete -F _loupe loupe
+    \\
+;
+
+const zsh_completions =
+    \\#compdef loupe
+    \\# loupe completions for zsh
+    \\# Install: loupe completions zsh | source /dev/stdin
+    \\# Persist: loupe completions zsh > ~/.zfunc/_loupe && fpath+=(~/.zfunc)
+    \\
+    \\_loupe() {
+    \\    local -a commands
+    \\    commands=(
+    \\        'faces:Detect faces in an image'
+    \\        'ocr:Recognize text in an image'
+    \\        'barcode:Scan barcodes in an image'
+    \\        'qr:Scan QR codes in an image'
+    \\        'landmarks:Detect facial landmarks'
+    \\        'classify:Classify image content'
+    \\        'body:Detect human body pose'
+    \\        'hands:Detect hand pose'
+    \\        'animals:Detect animals'
+    \\        'rectangles:Detect rectangular shapes'
+    \\        'horizon:Measure horizon tilt angle'
+    \\        'saliency:Find visually salient regions'
+    \\        'score:Rate image aesthetic quality'
+    \\        'segment:Generate person segmentation mask'
+    \\        'completions:Print shell completions'
+    \\        'help:Show help'
+    \\    )
+    \\
+    \\    _arguments -C \
+    \\        '--json[Output as JSON]' \
+    \\        '(--help -h)'{--help,-h}'[Show help]' \
+    \\        '(--version -V)'{--version,-V}'[Show version]' \
+    \\        '1:command:->cmd' \
+    \\        '*::arg:->args'
+    \\
+    \\    case "$state" in
+    \\        cmd)
+    \\            _describe 'command' commands
+    \\            ;;
+    \\        args)
+    \\            case "${words[1]}" in
+    \\                faces)
+    \\                    _arguments \
+    \\                        '-o[Output path]:file:_files' \
+    \\                        '--blur[Blur detected faces]' \
+    \\                        '--redact[Redact detected faces]' \
+    \\                        '--json[Output as JSON]' \
+    \\                        '*:image:_files'
+    \\                    ;;
+    \\                segment)
+    \\                    _arguments \
+    \\                        '-o[Save mask as PNG]:file:_files' \
+    \\                        '--json[Output as JSON]' \
+    \\                        '*:image:_files'
+    \\                    ;;
+    \\                saliency)
+    \\                    _arguments \
+    \\                        '--objects[Use objectness-based saliency]' \
+    \\                        '--json[Output as JSON]' \
+    \\                        '*:image:_files'
+    \\                    ;;
+    \\                ocr|barcode|qr|landmarks|classify|body|hands|animals|rectangles|horizon|score)
+    \\                    _arguments \
+    \\                        '--json[Output as JSON]' \
+    \\                        '*:image:_files'
+    \\                    ;;
+    \\                completions)
+    \\                    _values 'shell' fish bash zsh
+    \\                    ;;
+    \\            esac
+    \\            ;;
+    \\    esac
+    \\}
+    \\
+    \\_loupe "$@"
+    \\
+;
+
 fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, stderr_writer: *std.io.Writer) void {
-    // Create a grayscale CGImage from the mask data and save it
-    // We need to go through CoreGraphics to write a PNG
-    // For simplicity, use the vision layer — create a CGImage from raw grayscale data
-    _ = seg;
-    _ = path;
-    stderr_writer.print("Note: mask PNG output not yet implemented. Use --json to get mask dimensions.\n", .{}) catch {};
-    stderr_writer.flush() catch {};
+    vision.saveMaskAsPng(seg, path) catch |err| {
+        stderr_writer.print("Error: failed to save mask PNG: {s}\n", .{@errorName(err)}) catch {};
+        stderr_writer.flush() catch {};
+    };
 }
 
 // ---------------------------------------------------------------------------
