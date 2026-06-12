@@ -928,7 +928,7 @@ fn printArucoHuman(writer: *std.Io.Writer, results: []const vision.ArucoResult) 
     for (results, 0..) |r, idx| {
         writer.print("  Marker {d}: id {d} ({s})\n", .{ idx + 1, r.id, r.dictionary }) catch {};
         writer.print("    top-left: ({d:.3}, {d:.3})  top-right: ({d:.3}, {d:.3})\n", .{ r.corners[0].x, r.corners[0].y, r.corners[1].x, r.corners[1].y }) catch {};
-        writer.print("    bottom-right: ({d:.3}, {d:.3})  bottom-left: ({d:.3}, {d:.3})\n", .{ r.corners[2].x, r.corners[2].y, r.corners[3].x, r.corners[3].y }) catch {};
+        writer.print("    bottom-left: ({d:.3}, {d:.3})  bottom-right: ({d:.3}, {d:.3})\n", .{ r.corners[3].x, r.corners[3].y, r.corners[2].x, r.corners[2].y }) catch {};
     }
 }
 
