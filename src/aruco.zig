@@ -469,20 +469,21 @@ test "decodeQuad rejects a corrupted border" {
 }
 
 test "decodeQuad error tolerance: 1 flipped bit decodes in auto mode, 2 do not" {
-    // Flip inner bits by XOR-ing the code before rendering.
-    const base = dicts.dict_4x4[23];
+    // id 0 with bit 3 flipped was verified to have a unique nearest dictionary
+    // entry (no other entry within distance 1 at any rotation); the 2-flip code
+    // (bits 3 and 2, mask 0x000c) has no entry within distance 1 at all.
+    const base = dicts.dict_4x4[0];
     var pixels: [200 * 200]u8 = undefined;
     const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
     const q = markerQuad(4, 40, 40, 20);
 
-    renderMarker(&pixels, 200, 4, base ^ 0b1, 40, 40, 20);
+    renderMarker(&pixels, 200, 4, base ^ (1 << 3), 40, 40, 20);
     const one_flip = decodeQuad(img, q, .{}).?;
-    try std.testing.expectEqual(@as(u32, 23), one_flip.id);
+    try std.testing.expectEqual(@as(u32, 0), one_flip.id);
 
-    renderMarker(&pixels, 200, 4, base ^ 0b101, 40, 40, 20);
-    // Two flips exceed auto mode's strict budget. (The damaged code could in
-    // principle land within 1 bit of a *different* dictionary entry; ids 22/24
-    // are far from id 23 in Hamming distance, so expect null.)
+    renderMarker(&pixels, 200, 4, base ^ 0x000c, 40, 40, 20);
+    // Two flips (bits 3 and 2) exceed auto mode's strict budget and were verified
+    // to have no dictionary entry within distance 1 at any rotation: expect null.
     try std.testing.expectEqual(@as(?Decoded, null), decodeQuad(img, q, .{}));
 }
 
@@ -492,8 +493,8 @@ test "decodeQuad with a spec uses the dictionary's full correction budget" {
     const corr = dicts.dict_7x7_maxcorr;
     if (corr < 2) return error.SkipZigTest;
     var flipped = dicts.dict_7x7[5];
-    var i: u6 = 0;
-    while (i < corr) : (i += 1) flipped ^= (@as(u64, 1) << i);
+    var i: usize = 0;
+    while (i < corr) : (i += 1) flipped ^= (@as(u64, 1) << @intCast(i));
 
     var pixels: [270 * 270]u8 = undefined;
     renderMarker(&pixels, 270, 7, flipped, 0, 0, 30);
