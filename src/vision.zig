@@ -222,9 +222,14 @@ pub fn detectRectangles(allocator: Allocator, image: ImageHandle) VisionError![]
     return platform.detectRectangles(allocator, image);
 }
 
-pub fn detectAruco(allocator: Allocator, image: ImageHandle, spec: ?aruco.DictSpec) VisionError![]ArucoResult {
+pub fn detectAruco(allocator: Allocator, image: ImageHandle, opts: aruco.Options) VisionError![]ArucoResult {
     const candidates = try platform.detectArucoCandidates(allocator, image);
     defer allocator.free(candidates);
+
+    // Skip the full-resolution grayscale render when there is nothing to decode.
+    if (candidates.len == 0) {
+        return allocator.alloc(ArucoResult, 0) catch return VisionError.OutOfMemory;
+    }
 
     const gray = try platform.getGrayscalePixels(allocator, image);
     defer allocator.free(gray.pixels);
@@ -243,13 +248,15 @@ pub fn detectAruco(allocator: Allocator, image: ImageHandle, spec: ?aruco.DictSp
             .bottom_right = .{ .x = cand.bottom_right.x * w, .y = cand.bottom_right.y * h },
             .bottom_left = .{ .x = cand.bottom_left.x * w, .y = cand.bottom_left.y * h },
         };
-        const decoded = aruco.decodeQuad(img, quad, .{ .spec = spec }) orelse continue;
+        const decoded = aruco.decodeQuad(img, quad, opts) orelse continue;
 
         var corners: [4]LandmarkPoint = undefined;
-        var min_x: f64 = 1.0;
-        var min_y: f64 = 1.0;
-        var max_x: f64 = 0.0;
-        var max_y: f64 = 0.0;
+        // Vision can return normalized coordinates slightly outside [0, 1] for
+        // near-edge quads, so the extrema must start at infinity.
+        var min_x = std.math.inf(f64);
+        var min_y = std.math.inf(f64);
+        var max_x = -std.math.inf(f64);
+        var max_y = -std.math.inf(f64);
         for (decoded.corners, 0..) |p, i| {
             const nx = p.x / w;
             const ny = p.y / h;
@@ -311,6 +318,8 @@ pub fn freeImage(image: ImageHandle) void {
 pub fn freeResults(allocator: Allocator, comptime T: type, results: []T) void {
     for (results) |*r| {
         switch (T) {
+            // dictionary is a static string; nothing to free per item.
+            ArucoResult => {},
             OcrResult => allocator.free(r.text),
             BarcodeResult => allocator.free(r.payload),
             ClassifyResult => allocator.free(r.label),
