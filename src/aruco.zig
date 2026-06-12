@@ -230,3 +230,172 @@ test "sampleBilinear interpolates and clamps" {
     // out-of-bounds clamps to the nearest edge pixel
     try std.testing.expectApproxEqAbs(@as(f64, 255), sampleBilinear(img, 99, 99), 1e-9);
 }
+
+pub const DictSpec = struct { n: u8, size: u32 };
+
+pub const Options = struct {
+    /// null = auto-detect across all four families with strict (≤1 bit)
+    /// matching. Set = search one dictionary with its full error-correction
+    /// budget.
+    spec: ?DictSpec = null,
+};
+
+pub const Decoded = struct {
+    id: u32,
+    n: u8,
+    /// Quad corners reordered so corner 0 is the marker's canonical top-left,
+    /// clockwise, pixel coordinates.
+    corners: [4]Point,
+};
+
+/// Reject candidates whose brightest and darkest cells differ by less than
+/// this — there is no marker there, just a flat region.
+const min_contrast = 30.0;
+
+fn sampleCells(img: GrayImage, persp: Perspective, total: usize, cells: []f64) void {
+    // Average 5 sub-samples per cell to tolerate slightly loose quads.
+    const offsets = [_][2]f64{ .{ 0, 0 }, .{ -0.2, -0.2 }, .{ 0.2, -0.2 }, .{ -0.2, 0.2 }, .{ 0.2, 0.2 } };
+    const ftotal: f64 = @floatFromInt(total);
+    for (0..total) |r| {
+        for (0..total) |c| {
+            var sum: f64 = 0;
+            for (offsets) |off| {
+                const u = (@as(f64, @floatFromInt(c)) + 0.5 + off[0]) / ftotal;
+                const v = (@as(f64, @floatFromInt(r)) + 0.5 + off[1]) / ftotal;
+                const p = persp.map(u, v);
+                sum += sampleBilinear(img, p.x, p.y);
+            }
+            cells[r * total + c] = sum / offsets.len;
+        }
+    }
+}
+
+/// A match at rotation k means the sampled grid rotated 90°·k clockwise
+/// equals the canonical marker, so the canonical top-left corner is k steps
+/// earlier in the clockwise corner list.
+fn canonicalCorners(quad: Quad, k: usize) [4]Point {
+    const in = [4]Point{ quad.top_left, quad.top_right, quad.bottom_right, quad.bottom_left };
+    var out: [4]Point = undefined;
+    for (0..4) |i| {
+        out[i] = in[(i + 4 - k) % 4];
+    }
+    return out;
+}
+
+pub fn decodeQuad(img: GrayImage, quad: Quad, opts: Options) ?Decoded {
+    if (img.width < 2 or img.height < 2) return null;
+    const persp = perspectiveFromQuad(quad) orelse return null;
+
+    var best: ?Decoded = null;
+    var best_dist: u32 = std.math.maxInt(u32);
+
+    for (families) |family| {
+        const size: u32 = if (opts.spec) |s| blk: {
+            if (s.n != family.n) continue;
+            break :blk s.size;
+        } else 1000;
+        const max_dist: u32 = if (opts.spec != null) family.max_correction else 1;
+
+        const total = @as(usize, family.n) + 2;
+        var cells_buf: [81]f64 = undefined; // (7+2)² max
+        const cells = cells_buf[0 .. total * total];
+        sampleCells(img, persp, total, cells);
+
+        // Threshold halfway between the darkest and brightest cell.
+        var lo: f64 = 255.0;
+        var hi: f64 = 0.0;
+        for (cells) |v| {
+            lo = @min(lo, v);
+            hi = @max(hi, v);
+        }
+        if (hi - lo < min_contrast) continue;
+        const threshold = (lo + hi) / 2.0;
+
+        // The border ring must be black; tolerate up to 20% bad cells.
+        const border_count = 4 * total - 4;
+        var border_errors: usize = 0;
+        for (0..total) |r| {
+            for (0..total) |c| {
+                const is_border = r == 0 or c == 0 or r == total - 1 or c == total - 1;
+                if (is_border and cells[r * total + c] >= threshold) border_errors += 1;
+            }
+        }
+        if (border_errors > border_count / 5) continue;
+
+        // Pack inner bits (1 = white), row-major, MSB first.
+        var code: u64 = 0;
+        for (1..total - 1) |r| {
+            for (1..total - 1) |c| {
+                const bit: u64 = if (cells[r * total + c] >= threshold) 1 else 0;
+                code = (code << 1) | bit;
+            }
+        }
+
+        // Try the 4 rotations against the dictionary, keep the best match.
+        var rotated = code;
+        for (0..4) |rot| {
+            for (family.codes[0..size], 0..) |entry, id| {
+                const dist: u32 = @popCount(entry ^ rotated);
+                if (dist <= max_dist and dist < best_dist) {
+                    best_dist = dist;
+                    best = .{
+                        .id = @intCast(id),
+                        .n = family.n,
+                        .corners = canonicalCorners(quad, rot),
+                    };
+                }
+            }
+            rotated = rotate90(rotated, family.n);
+        }
+    }
+
+    return best;
+}
+
+/// Test helper: render an axis-aligned marker (with its 1-cell black border)
+/// onto a white canvas. `cell` is the side of one cell in pixels; the marker
+/// occupies (n+2)*cell pixels starting at (x0, y0).
+fn renderMarker(pixels: []u8, img_w: usize, n: u8, code: u64, x0: usize, y0: usize, cell: usize) void {
+    @memset(pixels, 255);
+    const total = @as(usize, n) + 2;
+    for (0..total) |r| {
+        for (0..total) |c| {
+            const is_border = r == 0 or c == 0 or r == total - 1 or c == total - 1;
+            const white = !is_border and bitAt(code, n, r - 1, c - 1) == 1;
+            const value: u8 = if (white) 255 else 0;
+            for (0..cell) |dy| {
+                const row_start = (y0 + r * cell + dy) * img_w + x0 + c * cell;
+                @memset(pixels[row_start .. row_start + cell], value);
+            }
+        }
+    }
+}
+
+/// Test helper: the exact outer quad of a marker rendered by renderMarker.
+fn markerQuad(n: u8, x0: usize, y0: usize, cell: usize) Quad {
+    const side: f64 = @floatFromInt((@as(usize, n) + 2) * cell);
+    const fx: f64 = @floatFromInt(x0);
+    const fy: f64 = @floatFromInt(y0);
+    return .{
+        .top_left = .{ .x = fx, .y = fy },
+        .top_right = .{ .x = fx + side, .y = fy },
+        .bottom_right = .{ .x = fx + side, .y = fy + side },
+        .bottom_left = .{ .x = fx, .y = fy + side },
+    };
+}
+
+test "decodeQuad decodes a rendered 4x4 marker" {
+    var pixels: [200 * 200]u8 = undefined;
+    renderMarker(&pixels, 200, 4, dicts.dict_4x4[23], 40, 40, 20);
+    const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
+    const result = decodeQuad(img, markerQuad(4, 40, 40, 20), .{}).?;
+    try std.testing.expectEqual(@as(u32, 23), result.id);
+    try std.testing.expectEqual(@as(u8, 4), result.n);
+}
+
+test "decodeQuad returns null on a blank image" {
+    var pixels: [100 * 100]u8 = undefined;
+    @memset(&pixels, 255);
+    const img = GrayImage{ .width = 100, .height = 100, .pixels = &pixels };
+    try std.testing.expectEqual(@as(?Decoded, null), decodeQuad(img, markerQuad(4, 10, 10, 10), .{}));
+}
