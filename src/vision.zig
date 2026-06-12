@@ -128,6 +128,13 @@ pub const SegmentResult = struct {
     mask_data: []const u8,
 };
 
+/// Grayscale pixel buffer, row-major, one byte per pixel, row 0 = top.
+pub const GrayPixels = struct {
+    width: usize,
+    height: usize,
+    pixels: []u8,
+};
+
 /// Platform-specific image handle. On macOS this will be a CGImageRef.
 pub const ImageHandle = platform.ImageHandle;
 
@@ -253,4 +260,16 @@ pub fn freeResults(allocator: Allocator, comptime T: type, results: []T) void {
 
 pub fn freeSegment(allocator: Allocator, seg: SegmentResult) void {
     allocator.free(seg.mask_data);
+}
+
+pub fn getGrayscalePixels(allocator: Allocator, image: ImageHandle) VisionError!GrayPixels {
+    return platform.getGrayscalePixels(allocator, image);
+}
+
+pub fn detectArucoCandidates(allocator: Allocator, image: ImageHandle) VisionError![]RectangleResult {
+    return platform.detectArucoCandidates(allocator, image);
+}
+
+pub fn freeGrayPixels(allocator: Allocator, gp: GrayPixels) void {
+    allocator.free(gp.pixels);
 }

@@ -173,7 +173,7 @@ pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, source_image: 
     defer CGColorSpaceRelease(gray_space);
 
     const mask_ctx = CGBitmapContextCreate(
-        @constCast(@ptrCast(seg.mask_data.ptr)),
+        @ptrCast(@constCast(seg.mask_data.ptr)),
         seg.width,
         seg.height,
         8,
@@ -229,9 +229,40 @@ pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, source_image: 
     if (!ok) return vision.VisionError.SaveFailed;
 }
 
-// ---------------------------------------------------------------------------
-// Stubs for later tasks
-// ---------------------------------------------------------------------------
+/// Render the image into an 8-bit grayscale buffer. Row 0 is the top of the
+/// image (CGBitmapContext memory order), matching aruco.GrayImage.
+pub fn getGrayscalePixels(allocator: Allocator, image: ImageHandle) vision.VisionError!vision.GrayPixels {
+    const width = CGImageGetWidth(image);
+    const height = CGImageGetHeight(image);
+    if (width == 0 or height == 0) return vision.VisionError.DetectionFailed;
+
+    const gray_space = CGColorSpaceCreateDeviceGray() orelse return vision.VisionError.DetectionFailed;
+    defer CGColorSpaceRelease(gray_space);
+
+    const pixels = allocator.alloc(u8, width * height) catch return vision.VisionError.OutOfMemory;
+    errdefer allocator.free(pixels);
+
+    const ctx = CGBitmapContextCreate(
+        pixels.ptr,
+        width,
+        height,
+        8,
+        width,
+        gray_space,
+        kCGImageAlphaNone,
+    ) orelse return vision.VisionError.DetectionFailed;
+    defer CGContextRelease(ctx);
+
+    const rect = CGRect{
+        .origin_x = 0,
+        .origin_y = 0,
+        .size_width = @floatFromInt(width),
+        .size_height = @floatFromInt(height),
+    };
+    CGContextDrawImage(ctx, rect, image);
+
+    return .{ .width = width, .height = height, .pixels = pixels };
+}
 
 // ---------------------------------------------------------------------------
 // Vision framework helpers for face detection
@@ -821,7 +852,7 @@ pub fn detectBodyPose(allocator: Allocator, image: ImageHandle) vision.VisionErr
 
 fn extractHandJoints(allocator: Allocator, observation: objc.id) vision.VisionError![]vision.JointPoint {
     const joint_names = [_][*:0]const u8{
-        "VNHLKW",  // wrist
+        "VNHLKW", // wrist
         "VNHLKT1", // thumb CMC
         "VNHLKT2", // thumb MP
         "VNHLKT3", // thumb IP
@@ -845,11 +876,26 @@ fn extractHandJoints(allocator: Allocator, observation: objc.id) vision.VisionEr
     };
     const display_names = [_][]const u8{
         "wrist",
-        "thumb_cmc",      "thumb_mp",      "thumb_ip",      "thumb_tip",
-        "index_mcp",      "index_pip",     "index_dip",     "index_tip",
-        "middle_mcp",     "middle_pip",    "middle_dip",    "middle_tip",
-        "ring_mcp",       "ring_pip",      "ring_dip",      "ring_tip",
-        "little_mcp",     "little_pip",    "little_dip",    "little_tip",
+        "thumb_cmc",
+        "thumb_mp",
+        "thumb_ip",
+        "thumb_tip",
+        "index_mcp",
+        "index_pip",
+        "index_dip",
+        "index_tip",
+        "middle_mcp",
+        "middle_pip",
+        "middle_dip",
+        "middle_tip",
+        "ring_mcp",
+        "ring_pip",
+        "ring_dip",
+        "ring_tip",
+        "little_mcp",
+        "little_pip",
+        "little_dip",
+        "little_tip",
     };
 
     const joints = allocator.alloc(vision.JointPoint, joint_names.len) catch return vision.VisionError.OutOfMemory;
@@ -1154,6 +1200,75 @@ pub fn detectRectangles(allocator: Allocator, image: ImageHandle) vision.VisionE
         const bbox = getBoundingBox(obs);
 
         // Get corner points (normalized CGPoint)
+        const get_point_fn: *const fn (objc.id, objc.SEL) callconv(.c) CGPoint = @ptrCast(&objc_msgSend);
+        const tl = get_point_fn(obs, objc.sel("topLeft"));
+        const tr = get_point_fn(obs, objc.sel("topRight"));
+        const bl = get_point_fn(obs, objc.sel("bottomLeft"));
+        const br = get_point_fn(obs, objc.sel("bottomRight"));
+
+        items[i] = .{
+            .top_left = .{ .x = tl.x, .y = 1.0 - tl.y },
+            .top_right = .{ .x = tr.x, .y = 1.0 - tr.y },
+            .bottom_left = .{ .x = bl.x, .y = 1.0 - bl.y },
+            .bottom_right = .{ .x = br.x, .y = 1.0 - br.y },
+            .box = .{
+                .x = bbox.origin_x,
+                .y = 1.0 - bbox.origin_y - bbox.size_height,
+                .width = bbox.size_width,
+                .height = bbox.size_height,
+            },
+        };
+    }
+
+    return items;
+}
+
+/// Rectangle detection tuned for ArUco candidates: unlimited observations,
+/// small minimum size, low confidence floor, generous corner-angle tolerance.
+pub fn detectArucoCandidates(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.RectangleResult {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(image);
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNDetectRectanglesRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const set_max_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_max_fn(request, objc.sel("setMaximumObservations:"), @as(objc.NSUInteger, 0)); // 0 = unlimited
+
+    const set_f32_fn: *const fn (objc.id, objc.SEL, f32) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_f32_fn(request, objc.sel("setMinimumSize:"), 0.02);
+    set_f32_fn(request, objc.sel("setMinimumConfidence:"), 0.3);
+    set_f32_fn(request, objc.sel("setMinimumAspectRatio:"), 0.3);
+    set_f32_fn(request, objc.sel("setMaximumAspectRatio:"), 1.0);
+    set_f32_fn(request, objc.sel("setQuadratureTolerance:"), 30.0);
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    const success = perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr);
+    if (!success) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    if (count == 0) return allocator.alloc(vision.RectangleResult, 0) catch return vision.VisionError.OutOfMemory;
+
+    const items = allocator.alloc(vision.RectangleResult, count) catch return vision.VisionError.OutOfMemory;
+
+    for (0..count) |i| {
+        const obs = objc.nsArrayObjectAtIndex(results, i);
+        const bbox = getBoundingBox(obs);
+
         const get_point_fn: *const fn (objc.id, objc.SEL) callconv(.c) CGPoint = @ptrCast(&objc_msgSend);
         const tl = get_point_fn(obs, objc.sel("topLeft"));
         const tr = get_point_fn(obs, objc.sel("topRight"));

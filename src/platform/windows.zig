@@ -975,3 +975,15 @@ pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, source_image: 
     _ = source_image;
     return vision.VisionError.UnsupportedPlatform;
 }
+
+pub fn getGrayscalePixels(allocator: Allocator, image: ImageHandle) vision.VisionError!vision.GrayPixels {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
+pub fn detectArucoCandidates(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.RectangleResult {
+    _ = allocator;
+    _ = image;
+    return vision.VisionError.UnsupportedPlatform;
+}
