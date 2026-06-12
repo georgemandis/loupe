@@ -289,10 +289,19 @@ pub fn decodeQuad(img: GrayImage, quad: Quad, opts: Options) ?Decoded {
     var best: ?Decoded = null;
     var best_dist: u32 = std.math.maxInt(u32);
 
-    for (families) |family| {
+    // Iterate families largest-n first (7→6→5→4). DICT_4X4_1000 is dense in
+    // 16-bit space, so a downsampled 6x6 or 7x7 code can collide with a 4x4
+    // entry at Hamming distance 0–1. By scanning larger grids first and using
+    // strict dist < best_dist, any equal-distance tie keeps the larger-grid
+    // match, which is statistically correct: chance collisions are exponentially
+    // rarer in 36-bit or 49-bit spaces than in 16-bit space.
+    var fi: usize = families.len;
+    while (fi > 0) {
+        fi -= 1;
+        const family = families[fi];
         const size: u32 = if (opts.spec) |s| blk: {
             if (s.n != family.n) continue;
-            break :blk s.size;
+            break :blk @min(s.size, @as(u32, @intCast(family.codes.len)));
         } else 1000;
         const max_dist: u32 = if (opts.spec != null) family.max_correction else 1;
 
@@ -398,4 +407,21 @@ test "decodeQuad returns null on a blank image" {
     @memset(&pixels, 255);
     const img = GrayImage{ .width = 100, .height = 100, .pixels = &pixels };
     try std.testing.expectEqual(@as(?Decoded, null), decodeQuad(img, markerQuad(4, 10, 10, 10), .{}));
+}
+
+test "auto-detect does not alias 6x6 markers into smaller families" {
+    // Regression: DICT_4X4_1000 is dense enough that downsampled 6x6
+    // markers used to collide with it on ~5% of ids.
+    var pixels: [80 * 80]u8 = undefined;
+    const img = GrayImage{ .width = 80, .height = 80, .pixels = &pixels };
+    const q = markerQuad(6, 0, 0, 10);
+    for (dicts.dict_6x6, 0..) |code, id| {
+        renderMarker(&pixels, 80, 6, code, 0, 0, 10);
+        const result = decodeQuad(img, q, .{}) orelse {
+            std.debug.print("id {d}: no decode\n", .{id});
+            return error.TestUnexpectedResult;
+        };
+        try std.testing.expectEqual(@as(u8, 6), result.n);
+        try std.testing.expectEqual(@as(u32, @intCast(id)), result.id);
+    }
 }
