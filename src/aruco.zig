@@ -233,6 +233,42 @@ test "sampleBilinear interpolates and clamps" {
 
 pub const DictSpec = struct { n: u8, size: u32 };
 
+const dict_sizes = [_]u32{ 50, 100, 250, 1000 };
+
+/// Valid --dict values, for error messages.
+pub const dict_names_help =
+    "4X4_50, 4X4_100, 4X4_250, 4X4_1000, 5X5_50, 5X5_100, 5X5_250, 5X5_1000, " ++
+    "6X6_50, 6X6_100, 6X6_250, 6X6_1000, 7X7_50, 7X7_100, 7X7_250, 7X7_1000";
+
+/// Smallest standard dictionary containing this id, e.g. (4, 23) → "DICT_4X4_50".
+pub fn canonicalName(n: u8, id: u32) []const u8 {
+    inline for (.{ 4, 5, 6, 7 }) |fam_n| {
+        if (n == fam_n) {
+            inline for (dict_sizes) |size| {
+                if (id < size) {
+                    return std.fmt.comptimePrint("DICT_{d}X{d}_{d}", .{ fam_n, fam_n, size });
+                }
+            }
+        }
+    }
+    unreachable; // n is always 4..7 and id < 1000
+}
+
+/// Parse "DICT_4X4_50", "4X4_50", or "4x4_50" into a DictSpec.
+pub fn dictByName(name: []const u8) ?DictSpec {
+    var rest = name;
+    if (std.ascii.startsWithIgnoreCase(rest, "DICT_")) rest = rest[5..];
+    inline for (.{ 4, 5, 6, 7 }) |n| {
+        inline for (dict_sizes) |size| {
+            const candidate = std.fmt.comptimePrint("{d}X{d}_{d}", .{ n, n, size });
+            if (std.ascii.eqlIgnoreCase(rest, candidate)) {
+                return .{ .n = n, .size = size };
+            }
+        }
+    }
+    return null;
+}
+
 pub const Options = struct {
     /// null = auto-detect across all four families with strict (≤1 bit)
     /// matching. Set = search one dictionary with its full error-correction
@@ -509,4 +545,19 @@ test "decodeQuad with a mismatched spec finds nothing" {
     const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
     const result = decodeQuad(img, markerQuad(4, 40, 40, 20), .{ .spec = .{ .n = 6, .size = 250 } });
     try std.testing.expectEqual(@as(?Decoded, null), result);
+}
+
+test "canonicalName picks the smallest standard dictionary" {
+    try std.testing.expectEqualStrings("DICT_4X4_50", canonicalName(4, 23));
+    try std.testing.expectEqualStrings("DICT_4X4_100", canonicalName(4, 50));
+    try std.testing.expectEqualStrings("DICT_6X6_250", canonicalName(6, 249));
+    try std.testing.expectEqualStrings("DICT_7X7_1000", canonicalName(7, 999));
+}
+
+test "dictByName parses names with and without prefix, case-insensitive" {
+    try std.testing.expectEqual(DictSpec{ .n = 4, .size = 50 }, dictByName("DICT_4X4_50").?);
+    try std.testing.expectEqual(DictSpec{ .n = 6, .size = 250 }, dictByName("6x6_250").?);
+    try std.testing.expectEqual(DictSpec{ .n = 7, .size = 1000 }, dictByName("dict_7X7_1000").?);
+    try std.testing.expectEqual(@as(?DictSpec, null), dictByName("8X8_50"));
+    try std.testing.expectEqual(@as(?DictSpec, null), dictByName("4X4_75"));
 }
