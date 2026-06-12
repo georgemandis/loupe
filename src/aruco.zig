@@ -116,6 +116,8 @@ fn perspectiveFromQuad(q: Quad) ?Perspective {
 }
 
 fn sampleBilinear(img: GrayImage, x: f64, y: f64) f64 {
+    std.debug.assert(img.width >= 1 and img.height >= 1);
+    std.debug.assert(img.pixels.len == img.width * img.height);
     const max_x: f64 = @floatFromInt(img.width - 1);
     const max_y: f64 = @floatFromInt(img.height - 1);
     const cx = std.math.clamp(x, 0, max_x);
@@ -191,6 +193,21 @@ test "perspectiveFromQuad maps unit square corners to quad corners" {
     const bl = p.map(0, 1);
     try std.testing.expectApproxEqAbs(@as(f64, 8), bl.x, eps);
     try std.testing.expectApproxEqAbs(@as(f64, 120), bl.y, eps);
+}
+
+test "perspectiveFromQuad is genuinely projective in the interior" {
+    // Keystone trapezoid: an affine map (g = h = 0) would put the center at
+    // (50, 30); the projective map must put it at (50, 300/7).
+    const q = Quad{
+        .top_left = .{ .x = 0, .y = 0 },
+        .top_right = .{ .x = 100, .y = 0 },
+        .bottom_right = .{ .x = 70, .y = 60 },
+        .bottom_left = .{ .x = 30, .y = 60 },
+    };
+    const p = perspectiveFromQuad(q).?;
+    const center = p.map(0.5, 0.5);
+    try std.testing.expectApproxEqAbs(@as(f64, 50), center.x, 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 300.0 / 7.0), center.y, 1e-9);
 }
 
 test "perspectiveFromQuad rejects degenerate quads" {
