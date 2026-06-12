@@ -425,3 +425,87 @@ test "auto-detect does not alias 6x6 markers into smaller families" {
         try std.testing.expectEqual(@as(u32, @intCast(id)), result.id);
     }
 }
+
+test "decodeQuad handles rotated corner labeling and canonicalizes corners" {
+    // Render normally, but present the quad as if Vision had labeled the
+    // corners starting from a different physical corner (marker seen rotated).
+    var pixels: [200 * 200]u8 = undefined;
+    renderMarker(&pixels, 200, 4, dicts.dict_4x4[7], 40, 40, 20);
+    const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
+    const q = markerQuad(4, 40, 40, 20);
+
+    // Shift corner labels by one step clockwise: tl slot gets the physical tr…
+    const shifted = Quad{
+        .top_left = q.top_right,
+        .top_right = q.bottom_right,
+        .bottom_right = q.bottom_left,
+        .bottom_left = q.top_left,
+    };
+    const result = decodeQuad(img, shifted, .{}).?;
+    try std.testing.expectEqual(@as(u32, 7), result.id);
+    // Canonical corner 0 must land back on the physical top-left (40, 40).
+    try std.testing.expectApproxEqAbs(@as(f64, 40), result.corners[0].x, 1e-9);
+    try std.testing.expectApproxEqAbs(@as(f64, 40), result.corners[0].y, 1e-9);
+}
+
+test "decodeQuad auto-detects a 6x6 marker" {
+    var pixels: [300 * 300]u8 = undefined;
+    renderMarker(&pixels, 300, 6, dicts.dict_6x6[42], 30, 30, 30);
+    const img = GrayImage{ .width = 300, .height = 300, .pixels = &pixels };
+    const result = decodeQuad(img, markerQuad(6, 30, 30, 30), .{}).?;
+    try std.testing.expectEqual(@as(u32, 42), result.id);
+    try std.testing.expectEqual(@as(u8, 6), result.n);
+}
+
+test "decodeQuad rejects a corrupted border" {
+    var pixels: [200 * 200]u8 = undefined;
+    renderMarker(&pixels, 200, 4, dicts.dict_4x4[23], 40, 40, 20);
+    // Paint most of the top border row white (border is at rows 40..60).
+    for (40..60) |y| {
+        @memset(pixels[y * 200 + 40 .. y * 200 + 140], 255);
+    }
+    const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
+    try std.testing.expectEqual(@as(?Decoded, null), decodeQuad(img, markerQuad(4, 40, 40, 20), .{}));
+}
+
+test "decodeQuad error tolerance: 1 flipped bit decodes in auto mode, 2 do not" {
+    // Flip inner bits by XOR-ing the code before rendering.
+    const base = dicts.dict_4x4[23];
+    var pixels: [200 * 200]u8 = undefined;
+    const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
+    const q = markerQuad(4, 40, 40, 20);
+
+    renderMarker(&pixels, 200, 4, base ^ 0b1, 40, 40, 20);
+    const one_flip = decodeQuad(img, q, .{}).?;
+    try std.testing.expectEqual(@as(u32, 23), one_flip.id);
+
+    renderMarker(&pixels, 200, 4, base ^ 0b101, 40, 40, 20);
+    // Two flips exceed auto mode's strict budget. (The damaged code could in
+    // principle land within 1 bit of a *different* dictionary entry; ids 22/24
+    // are far from id 23 in Hamming distance, so expect null.)
+    try std.testing.expectEqual(@as(?Decoded, null), decodeQuad(img, q, .{}));
+}
+
+test "decodeQuad with a spec uses the dictionary's full correction budget" {
+    // 7x7 markers have the largest inter-marker distance, so flipping
+    // max_correction bits must still decode when the dictionary is given.
+    const corr = dicts.dict_7x7_maxcorr;
+    if (corr < 2) return error.SkipZigTest;
+    var flipped = dicts.dict_7x7[5];
+    var i: u6 = 0;
+    while (i < corr) : (i += 1) flipped ^= (@as(u64, 1) << i);
+
+    var pixels: [270 * 270]u8 = undefined;
+    renderMarker(&pixels, 270, 7, flipped, 0, 0, 30);
+    const img = GrayImage{ .width = 270, .height = 270, .pixels = &pixels };
+    const result = decodeQuad(img, markerQuad(7, 0, 0, 30), .{ .spec = .{ .n = 7, .size = 1000 } }).?;
+    try std.testing.expectEqual(@as(u32, 5), result.id);
+}
+
+test "decodeQuad with a mismatched spec finds nothing" {
+    var pixels: [200 * 200]u8 = undefined;
+    renderMarker(&pixels, 200, 4, dicts.dict_4x4[23], 40, 40, 20);
+    const img = GrayImage{ .width = 200, .height = 200, .pixels = &pixels };
+    const result = decodeQuad(img, markerQuad(4, 40, 40, 20), .{ .spec = .{ .n = 6, .size = 250 } });
+    try std.testing.expectEqual(@as(?Decoded, null), result);
+}
