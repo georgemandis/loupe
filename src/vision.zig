@@ -261,15 +261,3 @@ pub fn freeResults(allocator: Allocator, comptime T: type, results: []T) void {
 pub fn freeSegment(allocator: Allocator, seg: SegmentResult) void {
     allocator.free(seg.mask_data);
 }
-
-pub fn getGrayscalePixels(allocator: Allocator, image: ImageHandle) VisionError!GrayPixels {
-    return platform.getGrayscalePixels(allocator, image);
-}
-
-pub fn detectArucoCandidates(allocator: Allocator, image: ImageHandle) VisionError![]RectangleResult {
-    return platform.detectArucoCandidates(allocator, image);
-}
-
-pub fn freeGrayPixels(allocator: Allocator, gp: GrayPixels) void {
-    allocator.free(gp.pixels);
-}
