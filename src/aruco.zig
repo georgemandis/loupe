@@ -235,14 +235,30 @@ pub const DictSpec = struct { n: u8, size: u32 };
 
 const dict_sizes = [_]u32{ 50, 100, 250, 1000 };
 
-/// Valid --dict values, for error messages.
-pub const dict_names_help =
-    "4X4_50, 4X4_100, 4X4_250, 4X4_1000, 5X5_50, 5X5_100, 5X5_250, 5X5_1000, " ++
-    "6X6_50, 6X6_100, 6X6_250, 6X6_1000, 7X7_50, 7X7_100, 7X7_250, 7X7_1000";
+/// Grid sizes of the supported families — must stay in sync with `families`.
+const family_ns = blk: {
+    var ns: [families.len]u8 = undefined;
+    for (families, 0..) |fam, i| ns[i] = fam.n;
+    break :blk ns;
+};
+
+/// Valid --dict values, for error messages. Derived from family_ns ×
+/// dict_sizes so it can never drift from what dictByName accepts.
+pub const dict_names_help = blk: {
+    var s: []const u8 = "";
+    for (family_ns, 0..) |n, i| {
+        for (dict_sizes, 0..) |size, j| {
+            if (i != 0 or j != 0) s = s ++ ", ";
+            s = s ++ std.fmt.comptimePrint("{d}X{d}_{d}", .{ n, n, size });
+        }
+    }
+    break :blk s;
+};
 
 /// Smallest standard dictionary containing this id, e.g. (4, 23) → "DICT_4X4_50".
 pub fn canonicalName(n: u8, id: u32) []const u8 {
-    inline for (.{ 4, 5, 6, 7 }) |fam_n| {
+    std.debug.assert(n >= 4 and n <= 7 and id < 1000);
+    inline for (family_ns) |fam_n| {
         if (n == fam_n) {
             inline for (dict_sizes) |size| {
                 if (id < size) {
@@ -251,14 +267,14 @@ pub fn canonicalName(n: u8, id: u32) []const u8 {
             }
         }
     }
-    unreachable; // n is always 4..7 and id < 1000
+    unreachable; // guarded by the assert: n in family_ns and id < 1000
 }
 
 /// Parse "DICT_4X4_50", "4X4_50", or "4x4_50" into a DictSpec.
 pub fn dictByName(name: []const u8) ?DictSpec {
     var rest = name;
     if (std.ascii.startsWithIgnoreCase(rest, "DICT_")) rest = rest[5..];
-    inline for (.{ 4, 5, 6, 7 }) |n| {
+    inline for (family_ns) |n| {
         inline for (dict_sizes) |size| {
             const candidate = std.fmt.comptimePrint("{d}X{d}_{d}", .{ n, n, size });
             if (std.ascii.eqlIgnoreCase(rest, candidate)) {
