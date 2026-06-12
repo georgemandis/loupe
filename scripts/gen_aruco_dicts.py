@@ -10,7 +10,10 @@ Bit convention: row-major, MSB first, bit 1 = white cell.
 """
 import sys
 
-import cv2
+try:
+    import cv2
+except ImportError:
+    sys.exit("opencv-python-headless required. Run: uv run --with opencv-python-headless scripts/gen_aruco_dicts.py")
 
 FAMILIES = [
     (4, cv2.aruco.DICT_4X4_1000),
@@ -45,9 +48,10 @@ def main():
         codes = [marker_code(d, n, i) for i in range(1000)]
         assert len(set(codes)) == 1000, f"{n}x{n}: duplicate codes"
         out.append(f"pub const dict_{n}x{n}_maxcorr: u8 = {int(d.maxCorrectionBits)};")
+        hex_width = (n * n + 3) // 4
         out.append(f"pub const dict_{n}x{n} = [_]u64{{")
         for i in range(0, 1000, 8):
-            out.append("    " + " ".join(f"0x{c:x}," for c in codes[i : i + 8]))
+            out.append("    " + " ".join(f"0x{c:0{hex_width}x}," for c in codes[i : i + 8]))
         out.append("};")
         out.append("")
     sys.stdout.write("\n".join(out))

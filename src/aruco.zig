@@ -31,3 +31,10 @@ test "dictionary tables have 1000 entries that fit their grid" {
         }
     }
 }
+
+test "max_correction values match generated dictionary constants" {
+    try std.testing.expectEqual(@as(u8, 0), families[0].max_correction); // 4x4
+    try std.testing.expectEqual(@as(u8, 2), families[1].max_correction); // 5x5
+    try std.testing.expectEqual(@as(u8, 4), families[2].max_correction); // 6x6
+    try std.testing.expectEqual(@as(u8, 6), families[3].max_correction); // 7x7
+}
