@@ -72,6 +72,11 @@ detector and decoded in pure Zig — no OpenCV dependency. Trade-off: very
 small markers (under ~1% of image area) or extreme viewing angles may be
 missed compared to OpenCV's detector.
 
+`--dict <name>` restricts detection to one dictionary and applies that
+dictionary's own error-correction budget — which is 0 for the 4X4 families,
+so `--dict 4X4_50` requires an exact bit match. Auto-detection (no `--dict`)
+tolerates up to one flipped bit across all families.
+
 ### Image classification
 
 Classify image content using 1,300+ scene and object labels.
