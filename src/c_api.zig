@@ -31,6 +31,18 @@ pub const LoupeBarcodeResult = extern struct {
     height: f64,
 };
 
+pub const LoupeArucoResult = extern struct {
+    id: u32,
+    dictionary: ?[*:0]const u8,
+    /// Corner coordinates as x0,y0,x1,y1,x2,y2,x3,y3 — normalized, top-left
+    /// origin, canonical marker order (corner 0 = marker top-left), clockwise.
+    corners: [8]f64,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+};
+
 // --- Image lifecycle ---
 
 export fn loupe_load_image(path: [*:0]const u8) ?*anyopaque {
@@ -223,6 +235,56 @@ export fn loupe_scan_barcodes(
     return 0;
 }
 
+// --- ArUco marker detection ---
+
+export fn loupe_detect_aruco(
+    handle: *anyopaque,
+    out_results: *?[*]LoupeArucoResult,
+    out_count: *u32,
+) i32 {
+    const results = vision.detectAruco(allocator, handle, .{}) catch return -1;
+    defer vision.freeResults(allocator, vision.ArucoResult, results);
+
+    if (results.len == 0) {
+        out_results.* = null;
+        out_count.* = 0;
+        return 0;
+    }
+
+    const c_results = allocator.alloc(LoupeArucoResult, results.len) catch return -1;
+
+    for (results, 0..) |r, i| {
+        const c_dict = allocator.allocSentinel(u8, r.dictionary.len, 0) catch {
+            for (0..i) |j| {
+                if (c_results[j].dictionary) |d| allocator.free(d[0..std.mem.len(d)]);
+            }
+            allocator.free(c_results);
+            return -1;
+        };
+        @memcpy(c_dict[0..r.dictionary.len], r.dictionary);
+
+        var corners: [8]f64 = undefined;
+        for (r.corners, 0..) |p, j| {
+            corners[j * 2] = p.x;
+            corners[j * 2 + 1] = p.y;
+        }
+
+        c_results[i] = .{
+            .id = r.id,
+            .dictionary = c_dict,
+            .corners = corners,
+            .x = r.box.x,
+            .y = r.box.y,
+            .width = r.box.width,
+            .height = r.box.height,
+        };
+    }
+
+    out_results.* = c_results.ptr;
+    out_count.* = @intCast(c_results.len);
+    return 0;
+}
+
 // --- Memory management ---
 
 export fn loupe_free(ptr: ?*anyopaque) void {
@@ -234,7 +296,7 @@ export fn loupe_free(ptr: ?*anyopaque) void {
 /// Free an array of OCR results (frees each text string, then the array).
 export fn loupe_free_ocr_results(results: [*]LoupeOcrResult, count: u32) void {
     for (0..count) |i| {
-        if (results[i].text) |t| std.c.free(@constCast(@ptrCast(t)));
+        if (results[i].text) |t| std.c.free(@ptrCast(@constCast(t)));
     }
     std.c.free(@ptrCast(results));
 }
@@ -242,8 +304,16 @@ export fn loupe_free_ocr_results(results: [*]LoupeOcrResult, count: u32) void {
 /// Free an array of barcode results (frees each payload/symbology string, then the array).
 export fn loupe_free_barcode_results(results: [*]LoupeBarcodeResult, count: u32) void {
     for (0..count) |i| {
-        if (results[i].payload) |p| std.c.free(@constCast(@ptrCast(p)));
-        if (results[i].symbology) |s| std.c.free(@constCast(@ptrCast(s)));
+        if (results[i].payload) |p| std.c.free(@ptrCast(@constCast(p)));
+        if (results[i].symbology) |s| std.c.free(@ptrCast(@constCast(s)));
+    }
+    std.c.free(@ptrCast(results));
+}
+
+/// Free an array of ArUco results (frees each dictionary string, then the array).
+export fn loupe_free_aruco_results(results: [*]LoupeArucoResult, count: u32) void {
+    for (0..count) |i| {
+        if (results[i].dictionary) |d| std.c.free(@ptrCast(@constCast(d)));
     }
     std.c.free(@ptrCast(results));
 }
