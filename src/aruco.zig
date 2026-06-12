@@ -22,6 +22,7 @@ pub const families = [_]Family{
 
 /// Bit at (row, col) of an n×n code packed row-major, MSB first.
 pub fn bitAt(code: u64, n: u8, row: usize, col: usize) u1 {
+    std.debug.assert(n >= 1 and @as(usize, n) * n <= 64);
     const nn = @as(usize, n) * n;
     const shift: u6 = @intCast(nn - 1 - (row * n + col));
     return @intCast((code >> shift) & 1);
