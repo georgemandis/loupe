@@ -57,6 +57,26 @@ loupe barcode image.png
 loupe qr image.png          # QR codes only
 ```
 
+### ArUco marker detection
+
+Detect ArUco fiducial markers (all standard OpenCV dictionaries, auto-detected).
+
+```bash
+loupe aruco photo.jpg
+loupe aruco --dict 4X4_50 photo.jpg   # restrict to one dictionary
+loupe aruco --json photo.jpg
+```
+
+Candidate squares are found natively by the Vision framework's rectangle
+detector and decoded in pure Zig — no OpenCV dependency. Trade-off: very
+small markers (under ~1% of image area) or extreme viewing angles may be
+missed compared to OpenCV's detector.
+
+`--dict <name>` restricts detection to one dictionary and applies that
+dictionary's own error-correction budget — which is 0 for the 4X4 families,
+so `--dict 4X4_50` requires an exact bit match. Auto-detection (no `--dict`)
+tolerates up to one flipped bit across all families.
+
 ### Image classification
 
 Classify image content using 1,300+ scene and object labels.
@@ -111,6 +131,7 @@ All commands support `--json` for machine-readable output.
 | Face detection | Yes | Yes |
 | OCR | Yes | Yes |
 | Barcode/QR | Yes | - |
+| ArUco markers | Yes | - |
 | Face extraction (`-o`) | Yes | - |
 | Blur/redact | Yes | - |
 | Classification | Yes | - |

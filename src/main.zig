@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.3.1";
+const version = "0.4.0";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.Io.Writer) !void {
@@ -38,6 +38,7 @@ fn printUsage(writer: *std.Io.Writer) !void {
             \\  saliency   Find visually salient regions
             \\  score      Rate image aesthetic quality (macOS 15+)
             \\  segment    Generate person segmentation mask
+            \\  aruco      Detect ArUco fiducial markers
             \\
         , .{});
     }
@@ -65,6 +66,9 @@ fn printUsage(writer: *std.Io.Writer) !void {
             \\
             \\Options for 'saliency':
             \\  --objects             Use objectness-based saliency (default: attention-based)
+            \\
+            \\Options for 'aruco':
+            \\  --dict <name>        Restrict to one dictionary (e.g. 4X4_50, 6X6_250)
             \\
         , .{});
     }
@@ -193,6 +197,11 @@ pub fn main(init: std.process.Init) !void {
 
     if (std.mem.eql(u8, subcommand, "segment")) {
         runSegment(allocator, args[2..], &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "aruco")) {
+        runAruco(allocator, args[2..], &stdout.interface, &stderr.interface);
         return;
     }
 
@@ -848,6 +857,98 @@ fn hasPerson(seg: vision.SegmentResult) bool {
 }
 
 // ---------------------------------------------------------------------------
+// aruco subcommand (has --dict flag)
+// ---------------------------------------------------------------------------
+
+fn runAruco(
+    allocator: std.mem.Allocator,
+    sub_args: []const []const u8,
+    stdout_writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+    var spec: ?vision.aruco.DictSpec = null;
+
+    var i: usize = 0;
+    while (i < sub_args.len) : (i += 1) {
+        const arg = sub_args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.eql(u8, arg, "--dict")) {
+            i += 1;
+            if (i >= sub_args.len) {
+                stderr_writer.print("Error: --dict requires a dictionary name.\n", .{}) catch {};
+                stderr_writer.flush() catch {};
+                std.process.exit(2);
+            }
+            spec = vision.aruco.dictByName(sub_args[i]) orelse {
+                stderr_writer.print("Error: unknown dictionary: {s}\nValid dictionaries (case-insensitive, DICT_ prefix optional): {s}\n", .{ sub_args[i], vision.aruco.dict_names_help }) catch {};
+                stderr_writer.flush() catch {};
+                std.process.exit(2);
+            };
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\nUsage: loupe aruco [--dict <name>] [--json] <image>\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+
+    const handle = vision.loadImage(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const results = vision.detectAruco(allocator, handle, .{ .spec = spec }) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeResults(allocator, vision.ArucoResult, results);
+
+    if (json_mode) printArucoJson(stdout_writer, results) else printArucoHuman(stdout_writer, results);
+    stdout_writer.flush() catch {};
+    std.process.exit(0);
+}
+
+fn printArucoHuman(writer: *std.Io.Writer, results: []const vision.ArucoResult) void {
+    if (results.len == 0) {
+        writer.print("No markers detected.\n", .{}) catch {};
+        return;
+    }
+    writer.print("Found {d} marker{s}:\n", .{ results.len, if (results.len == 1) "" else "s" }) catch {};
+    for (results, 0..) |r, idx| {
+        writer.print("  Marker {d}: id {d} ({s})\n", .{ idx + 1, r.id, r.dictionary }) catch {};
+        writer.print("    top-left: ({d:.3}, {d:.3})  top-right: ({d:.3}, {d:.3})\n", .{ r.corners[0].x, r.corners[0].y, r.corners[1].x, r.corners[1].y }) catch {};
+        writer.print("    bottom-left: ({d:.3}, {d:.3})  bottom-right: ({d:.3}, {d:.3})\n", .{ r.corners[3].x, r.corners[3].y, r.corners[2].x, r.corners[2].y }) catch {};
+    }
+}
+
+fn printArucoJson(writer: *std.Io.Writer, results: []const vision.ArucoResult) void {
+    writer.print("{{\"markers\":[", .{}) catch {};
+    for (results, 0..) |r, idx| {
+        if (idx > 0) writer.print(",", .{}) catch {};
+        writer.print("{{\"id\":{d},\"dictionary\":\"{s}\",\"corners\":[", .{ r.id, r.dictionary }) catch {};
+        for (r.corners, 0..) |p, j| {
+            if (j > 0) writer.print(",", .{}) catch {};
+            writer.print("[{d:.4},{d:.4}]", .{ p.x, p.y }) catch {};
+        }
+        writer.print("],\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4}}}", .{
+            r.box.x, r.box.y, r.box.width, r.box.height,
+        }) catch {};
+    }
+    writer.print("]}}\n", .{}) catch {};
+}
+
+// ---------------------------------------------------------------------------
 // completions subcommand
 // ---------------------------------------------------------------------------
 
@@ -900,6 +1001,7 @@ const fish_completions =
     \\complete -c loupe -n "__fish_use_subcommand" -a "saliency" -d "Find visually salient regions"
     \\complete -c loupe -n "__fish_use_subcommand" -a "score" -d "Rate image aesthetic quality"
     \\complete -c loupe -n "__fish_use_subcommand" -a "segment" -d "Generate person segmentation mask"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "aruco" -d "Detect ArUco markers"
     \\complete -c loupe -n "__fish_use_subcommand" -a "completions" -d "Print shell completions"
     \\complete -c loupe -n "__fish_use_subcommand" -a "help" -d "Show help"
     \\complete -c loupe -l json -d "Output as JSON"
@@ -917,6 +1019,9 @@ const fish_completions =
     \\# saliency options
     \\complete -c loupe -n "__fish_seen_subcommand_from saliency" -l objects -d "Use objectness-based saliency"
     \\
+    \\# aruco options
+    \\complete -c loupe -n "__fish_seen_subcommand_from aruco" -l dict -r -d "Restrict to one dictionary"
+    \\
     \\# completions: shell name
     \\complete -c loupe -n "__fish_seen_subcommand_from completions" -a "fish bash zsh"
     \\
@@ -931,7 +1036,7 @@ const bash_completions =
     \\    local cur prev words cword
     \\    _init_completion || return
     \\
-    \\    local commands="faces ocr barcode qr landmarks classify body hands animals rectangles horizon saliency score segment completions help"
+    \\    local commands="faces ocr barcode qr landmarks classify body hands animals rectangles horizon saliency score segment aruco completions help"
     \\
     \\    if [[ $cword -eq 1 ]]; then
     \\        COMPREPLY=($(compgen -W "$commands --json --help -h --version -V" -- "$cur"))
@@ -949,6 +1054,9 @@ const bash_completions =
     \\            ;;
     \\        saliency)
     \\            COMPREPLY=($(compgen -W "--objects --json" -- "$cur"))
+    \\            ;;
+    \\        aruco)
+    \\            COMPREPLY=($(compgen -W "--dict --json" -- "$cur"))
     \\            ;;
     \\        ocr|barcode|qr|landmarks|classify|body|hands|animals|rectangles|horizon|score)
     \\            COMPREPLY=($(compgen -W "--json" -- "$cur"))
@@ -985,6 +1093,7 @@ const zsh_completions =
     \\        'saliency:Find visually salient regions'
     \\        'score:Rate image aesthetic quality'
     \\        'segment:Generate person segmentation mask'
+    \\        'aruco:Detect ArUco markers'
     \\        'completions:Print shell completions'
     \\        'help:Show help'
     \\    )
@@ -1019,6 +1128,12 @@ const zsh_completions =
     \\                saliency)
     \\                    _arguments \
     \\                        '--objects[Use objectness-based saliency]' \
+    \\                        '--json[Output as JSON]' \
+    \\                        '*:image:_files'
+    \\                    ;;
+    \\                aruco)
+    \\                    _arguments \
+    \\                        '--dict[Restrict to one dictionary]:dictionary' \
     \\                        '--json[Output as JSON]' \
     \\                        '*:image:_files'
     \\                    ;;
@@ -1217,8 +1332,8 @@ fn printRectanglesJson(writer: *std.Io.Writer, results: []const vision.Rectangle
     for (results, 0..) |r, idx| {
         if (idx > 0) writer.print(",", .{}) catch {};
         writer.print("{{\"top_left\":[{d:.4},{d:.4}],\"top_right\":[{d:.4},{d:.4}],\"bottom_left\":[{d:.4},{d:.4}],\"bottom_right\":[{d:.4},{d:.4}]}}", .{
-            r.top_left.x,  r.top_left.y,
-            r.top_right.x, r.top_right.y,
+            r.top_left.x,     r.top_left.y,
+            r.top_right.x,    r.top_right.y,
             r.bottom_left.x,  r.bottom_left.y,
             r.bottom_right.x, r.bottom_right.y,
         }) catch {};
