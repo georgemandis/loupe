@@ -8,6 +8,8 @@ const platform = switch (builtin.os.tag) {
     else => @compileError("Unsupported platform. Currently supported: macOS, Windows."),
 };
 
+pub const aruco = @import("aruco.zig");
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -135,6 +137,19 @@ pub const GrayPixels = struct {
     pixels: []u8,
 };
 
+/// Result of ArUco marker detection. The `dictionary` field is a static string
+/// (e.g. "DICT_4X4_50") and is never freed; freeResults handles this via the
+/// else => {} branch.
+pub const ArucoResult = struct {
+    id: u32,
+    grid: u8, // marker grid size: 4, 5, 6, or 7
+    dictionary: []const u8, // static string (e.g. "DICT_4X4_50") — never freed
+    /// Normalized coordinates, top-left origin, canonical marker order
+    /// (corner 0 = marker's top-left), clockwise.
+    corners: [4]LandmarkPoint,
+    box: BoundingBox,
+};
+
 /// Platform-specific image handle. On macOS this will be a CGImageRef.
 pub const ImageHandle = platform.ImageHandle;
 
@@ -205,6 +220,72 @@ pub fn recognizeAnimals(allocator: Allocator, image: ImageHandle) VisionError![]
 
 pub fn detectRectangles(allocator: Allocator, image: ImageHandle) VisionError![]RectangleResult {
     return platform.detectRectangles(allocator, image);
+}
+
+pub fn detectAruco(allocator: Allocator, image: ImageHandle, spec: ?aruco.DictSpec) VisionError![]ArucoResult {
+    const candidates = try platform.detectArucoCandidates(allocator, image);
+    defer allocator.free(candidates);
+
+    const gray = try platform.getGrayscalePixels(allocator, image);
+    defer allocator.free(gray.pixels);
+
+    const img = aruco.GrayImage{ .width = gray.width, .height = gray.height, .pixels = gray.pixels };
+    const w: f64 = @floatFromInt(gray.width);
+    const h: f64 = @floatFromInt(gray.height);
+
+    var results: std.ArrayList(ArucoResult) = .empty;
+    defer results.deinit(allocator);
+
+    for (candidates) |cand| {
+        const quad = aruco.Quad{
+            .top_left = .{ .x = cand.top_left.x * w, .y = cand.top_left.y * h },
+            .top_right = .{ .x = cand.top_right.x * w, .y = cand.top_right.y * h },
+            .bottom_right = .{ .x = cand.bottom_right.x * w, .y = cand.bottom_right.y * h },
+            .bottom_left = .{ .x = cand.bottom_left.x * w, .y = cand.bottom_left.y * h },
+        };
+        const decoded = aruco.decodeQuad(img, quad, .{ .spec = spec }) orelse continue;
+
+        var corners: [4]LandmarkPoint = undefined;
+        var min_x: f64 = 1.0;
+        var min_y: f64 = 1.0;
+        var max_x: f64 = 0.0;
+        var max_y: f64 = 0.0;
+        for (decoded.corners, 0..) |p, i| {
+            const nx = p.x / w;
+            const ny = p.y / h;
+            corners[i] = .{ .x = nx, .y = ny };
+            min_x = @min(min_x, nx);
+            min_y = @min(min_y, ny);
+            max_x = @max(max_x, nx);
+            max_y = @max(max_y, ny);
+        }
+
+        const new = ArucoResult{
+            .id = decoded.id,
+            .grid = decoded.n,
+            .dictionary = aruco.canonicalName(decoded.n, decoded.id),
+            .corners = corners,
+            .box = .{ .x = min_x, .y = min_y, .width = max_x - min_x, .height = max_y - min_y },
+        };
+
+        // Vision sometimes reports near-identical quads for one marker.
+        const cx = min_x + (max_x - min_x) / 2.0;
+        const cy = min_y + (max_y - min_y) / 2.0;
+        var dup = false;
+        for (results.items) |r| {
+            const rcx = r.box.x + r.box.width / 2.0;
+            const rcy = r.box.y + r.box.height / 2.0;
+            if (r.id == new.id and r.grid == new.grid and
+                @abs(rcx - cx) < 0.02 and @abs(rcy - cy) < 0.02)
+            {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) results.append(allocator, new) catch return VisionError.OutOfMemory;
+    }
+
+    return results.toOwnedSlice(allocator) catch return VisionError.OutOfMemory;
 }
 
 pub fn scoreAesthetics(image: ImageHandle) VisionError!AestheticsResult {
