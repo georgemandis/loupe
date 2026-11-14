@@ -174,8 +174,21 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) VisionError![]FaceR
     return platform.detectFaces(allocator, image);
 }
 
+/// Tuning for text recognition.
+pub const OcrOptions = struct {
+    /// Let the engine rewrite what it read toward dictionary words. Good for
+    /// prose; harmful for code, identifiers, serial numbers and anything else
+    /// where the exact characters matter (`rnut` for `mut`, `Hashmap` for
+    /// `HashMap`). Ignored on platforms whose engine has no such switch.
+    language_correction: bool = true,
+};
+
 pub fn recognizeText(allocator: Allocator, image: ImageHandle) VisionError![]OcrResult {
-    return platform.recognizeText(allocator, image);
+    return platform.recognizeText(allocator, image, .{});
+}
+
+pub fn recognizeTextWithOptions(allocator: Allocator, image: ImageHandle, options: OcrOptions) VisionError![]OcrResult {
+    return platform.recognizeText(allocator, image, options);
 }
 
 pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) VisionError![]BarcodeResult {

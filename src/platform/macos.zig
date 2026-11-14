@@ -347,7 +347,7 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
     return faces;
 }
 
-pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
+pub fn recognizeText(allocator: Allocator, image: ImageHandle, options: vision.OcrOptions) vision.VisionError![]vision.OcrResult {
     // 1. Create empty NSDictionary for options
     const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
     const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
@@ -363,9 +363,14 @@ pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionErro
     const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
     const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
 
-    // 4. Set recognition level to accurate (1)
+    // 4. Set recognition level to accurate.
+    //    VNRequestTextRecognitionLevelAccurate = 0, ...Fast = 1. This used to
+    //    pass 1 believing it meant "accurate", so every OCR ran in fast mode.
     const set_level_fn: *const fn (objc.id, objc.SEL, i64) callconv(.c) void = @ptrCast(&objc_msgSend);
-    set_level_fn(request, objc.sel("setRecognitionLevel:"), @as(i64, 1));
+    set_level_fn(request, objc.sel("setRecognitionLevel:"), @as(i64, 0));
+
+    const set_bool_fn: *const fn (objc.id, objc.SEL, bool) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_bool_fn(request, objc.sel("setUsesLanguageCorrection:"), options.language_correction);
 
     // 5. Wrap request in NSArray and perform
     const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;

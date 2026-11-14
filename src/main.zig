@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.4.0";
+const version = "0.4.1";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.Io.Writer) !void {
@@ -56,6 +56,10 @@ fn printUsage(writer: *std.Io.Writer) !void {
         \\  -o <output>          Extract detected faces to files (or apply --blur/--redact)
         \\  --blur               Blur detected faces in output image
         \\  --redact             Redact (black box) detected faces in output image
+        \\
+        \\Options for 'ocr':
+        \\  --literal            Return characters exactly as read, with no
+        \\                       dictionary correction (for code and identifiers)
         \\
     , .{});
 
@@ -407,12 +411,15 @@ fn runOcr(
 ) void {
     var image_path: ?[]const u8 = null;
     var json_mode = false;
+    var options = vision.OcrOptions{};
 
     var i: usize = 0;
     while (i < sub_args.len) : (i += 1) {
         const arg = sub_args[i];
         if (std.mem.eql(u8, arg, "--json")) {
             json_mode = true;
+        } else if (std.mem.eql(u8, arg, "--literal")) {
+            options.language_correction = false;
         } else if (std.mem.startsWith(u8, arg, "-")) {
             stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
             stderr_writer.flush() catch {};
@@ -423,7 +430,7 @@ fn runOcr(
     }
 
     const path = image_path orelse {
-        stderr_writer.print("Error: missing image path.\nUsage: loupe ocr [--json] <image>\n", .{}) catch {};
+        stderr_writer.print("Error: missing image path.\nUsage: loupe ocr [--json] [--literal] <image>\n", .{}) catch {};
         stderr_writer.flush() catch {};
         std.process.exit(2);
     };
@@ -434,7 +441,7 @@ fn runOcr(
     };
     defer vision.freeImage(handle);
 
-    const results = vision.recognizeText(allocator, handle) catch |err| {
+    const results = vision.recognizeTextWithOptions(allocator, handle, options) catch |err| {
         handleError(err, json_mode, stdout_writer, stderr_writer);
         return;
     };

@@ -125,12 +125,30 @@ export fn loupe_blur_faces(
 
 // --- OCR ---
 
+/// Flag for `loupe_recognize_text_ex`: return the characters as read, with
+/// no dictionary-based correction. Use for code and identifiers.
+pub const LOUPE_OCR_NO_LANGUAGE_CORRECTION: u32 = 1 << 0;
+
 export fn loupe_recognize_text(
     handle: *anyopaque,
     out_results: *?[*]LoupeOcrResult,
     out_count: *u32,
 ) i32 {
-    const results = vision.recognizeText(allocator, handle) catch return -1;
+    return loupe_recognize_text_ex(handle, 0, out_results, out_count);
+}
+
+/// `loupe_recognize_text` with option flags (LOUPE_OCR_*). Unknown flags are
+/// ignored. Results are freed with `loupe_free_ocr_results`.
+export fn loupe_recognize_text_ex(
+    handle: *anyopaque,
+    flags: u32,
+    out_results: *?[*]LoupeOcrResult,
+    out_count: *u32,
+) i32 {
+    const options = vision.OcrOptions{
+        .language_correction = (flags & LOUPE_OCR_NO_LANGUAGE_CORRECTION) == 0,
+    };
+    const results = vision.recognizeTextWithOptions(allocator, handle, options) catch return -1;
 
     if (results.len == 0) {
         out_results.* = null;

@@ -773,7 +773,9 @@ pub fn detectFaces(allocator: Allocator, image: ImageHandle) vision.VisionError!
     return faces;
 }
 
-pub fn recognizeText(allocator: Allocator, image: ImageHandle) vision.VisionError![]vision.OcrResult {
+pub fn recognizeText(allocator: Allocator, image: ImageHandle, options: vision.OcrOptions) vision.VisionError![]vision.OcrResult {
+    // Windows.Media.Ocr has no language-correction switch.
+    _ = options;
     const data: *ImageData = @ptrCast(@alignCast(image));
 
     // Ensure WinRT is initialized
