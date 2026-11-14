@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.4.1";
+const version = "0.5.0";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.Io.Writer) !void {
@@ -38,6 +38,7 @@ fn printUsage(writer: *std.Io.Writer) !void {
             \\  saliency   Find visually salient regions
             \\  score      Rate image aesthetic quality (macOS 15+)
             \\  segment    Generate person segmentation mask
+            \\  cutout     Remove the background, keeping the subject (macOS 14+)
             \\  aruco      Detect ArUco fiducial markers
             \\
         , .{});
@@ -67,6 +68,10 @@ fn printUsage(writer: *std.Io.Writer) !void {
         try writer.print(
             \\Options for 'segment':
             \\  -o <output.png>      Save segmentation mask as grayscale PNG
+            \\
+            \\Options for 'cutout':
+            \\  -o <output.png>      Where to save the subject on a transparent
+            \\                       background (required)
             \\
             \\Options for 'saliency':
             \\  --objects             Use objectness-based saliency (default: attention-based)
@@ -201,6 +206,11 @@ pub fn main(init: std.process.Init) !void {
 
     if (std.mem.eql(u8, subcommand, "segment")) {
         runSegment(allocator, args[2..], &stdout.interface, &stderr.interface);
+        return;
+    }
+
+    if (std.mem.eql(u8, subcommand, "cutout")) {
+        runCutout(args[2..], &stdout.interface, &stderr.interface);
         return;
     }
 
@@ -856,6 +866,85 @@ fn runSegment(
     std.process.exit(0);
 }
 
+// ---------------------------------------------------------------------------
+// cutout subcommand (background removal; requires -o)
+// ---------------------------------------------------------------------------
+
+fn runCutout(
+    sub_args: []const []const u8,
+    stdout_writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) void {
+    var image_path: ?[]const u8 = null;
+    var json_mode = false;
+    var output_path: ?[]const u8 = null;
+
+    var i: usize = 0;
+    while (i < sub_args.len) : (i += 1) {
+        const arg = sub_args[i];
+        if (std.mem.eql(u8, arg, "--json")) {
+            json_mode = true;
+        } else if (std.mem.eql(u8, arg, "-o")) {
+            i += 1;
+            if (i >= sub_args.len) {
+                stderr_writer.print("Error: -o requires an output path argument.\n", .{}) catch {};
+                stderr_writer.flush() catch {};
+                std.process.exit(2);
+            }
+            output_path = sub_args[i];
+        } else if (std.mem.startsWith(u8, arg, "-")) {
+            stderr_writer.print("Error: unknown option: {s}\n", .{arg}) catch {};
+            stderr_writer.flush() catch {};
+            std.process.exit(2);
+        } else {
+            image_path = arg;
+        }
+    }
+
+    const usage = "Usage: loupe cutout -o <output.png> [--json] <image>\n";
+    const path = image_path orelse {
+        stderr_writer.print("Error: missing image path.\n" ++ usage, .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+    const out_path = output_path orelse {
+        stderr_writer.print("Error: cutout needs -o <output.png>.\n" ++ usage, .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    };
+    if (!std.mem.endsWith(u8, out_path, ".png")) {
+        stderr_writer.print("Error: the output must be a .png (it has a transparent background).\n", .{}) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(2);
+    }
+
+    // Upright pixels, so the saved cutout is not sideways.
+    const handle = vision.loadImageOriented(path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(handle);
+
+    const cut = vision.removeBackground(handle) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+    defer vision.freeImage(cut);
+
+    vision.saveImage(cut, out_path) catch |err| {
+        handleError(err, json_mode, stdout_writer, stderr_writer);
+        return;
+    };
+
+    if (json_mode) {
+        stdout_writer.print("{{\"output\":\"{s}\"}}\n", .{out_path}) catch {};
+    } else {
+        stdout_writer.print("Saved {s}\n", .{out_path}) catch {};
+    }
+    stdout_writer.flush() catch {};
+    std.process.exit(0);
+}
+
 fn hasPerson(seg: vision.SegmentResult) bool {
     for (seg.mask_data) |b| {
         if (b > 128) return true;
@@ -1008,6 +1097,7 @@ const fish_completions =
     \\complete -c loupe -n "__fish_use_subcommand" -a "saliency" -d "Find visually salient regions"
     \\complete -c loupe -n "__fish_use_subcommand" -a "score" -d "Rate image aesthetic quality"
     \\complete -c loupe -n "__fish_use_subcommand" -a "segment" -d "Generate person segmentation mask"
+    \\complete -c loupe -n "__fish_use_subcommand" -a "cutout" -d "Remove the background, keeping the subject"
     \\complete -c loupe -n "__fish_use_subcommand" -a "aruco" -d "Detect ArUco markers"
     \\complete -c loupe -n "__fish_use_subcommand" -a "completions" -d "Print shell completions"
     \\complete -c loupe -n "__fish_use_subcommand" -a "help" -d "Show help"
@@ -1022,6 +1112,7 @@ const fish_completions =
     \\
     \\# segment options
     \\complete -c loupe -n "__fish_seen_subcommand_from segment" -s o -r -d "Save mask as PNG"
+    \\complete -c loupe -n "__fish_seen_subcommand_from cutout" -s o -r -d "Save subject as PNG"
     \\
     \\# saliency options
     \\complete -c loupe -n "__fish_seen_subcommand_from saliency" -l objects -d "Use objectness-based saliency"
@@ -1043,7 +1134,7 @@ const bash_completions =
     \\    local cur prev words cword
     \\    _init_completion || return
     \\
-    \\    local commands="faces ocr barcode qr landmarks classify body hands animals rectangles horizon saliency score segment aruco completions help"
+    \\    local commands="faces ocr barcode qr landmarks classify body hands animals rectangles horizon saliency score segment cutout aruco completions help"
     \\
     \\    if [[ $cword -eq 1 ]]; then
     \\        COMPREPLY=($(compgen -W "$commands --json --help -h --version -V" -- "$cur"))
@@ -1056,7 +1147,7 @@ const bash_completions =
     \\        faces)
     \\            COMPREPLY=($(compgen -W "-o --blur --redact --json" -- "$cur"))
     \\            ;;
-    \\        segment)
+    \\        segment|cutout)
     \\            COMPREPLY=($(compgen -W "-o --json" -- "$cur"))
     \\            ;;
     \\        saliency)
@@ -1100,6 +1191,7 @@ const zsh_completions =
     \\        'saliency:Find visually salient regions'
     \\        'score:Rate image aesthetic quality'
     \\        'segment:Generate person segmentation mask'
+    \\        'cutout:Remove the background, keeping the subject'
     \\        'aruco:Detect ArUco markers'
     \\        'completions:Print shell completions'
     \\        'help:Show help'
@@ -1126,7 +1218,7 @@ const zsh_completions =
     \\                        '--json[Output as JSON]' \
     \\                        '*:image:_files'
     \\                    ;;
-    \\                segment)
+    \\                segment|cutout)
     \\                    _arguments \
     \\                        '-o[Save mask as PNG]:file:_files' \
     \\                        '--json[Output as JSON]' \
@@ -1398,6 +1490,7 @@ fn handleError(
             error.SaveFailed => "save_failed",
             error.UnsupportedFormat => "unsupported_format",
             error.UnsupportedPlatform => "unsupported_platform",
+            error.NoSubject => "no_subject",
             else => "unknown_error",
         };
         stdout_writer.print("{{\"error\":\"{s}\"}}\n", .{error_key}) catch {};
@@ -1410,6 +1503,7 @@ fn handleError(
         error.SaveFailed => stderr_writer.print("Error: failed to save image.\n", .{}) catch {},
         error.UnsupportedFormat => stderr_writer.print("Error: unsupported image format.\n", .{}) catch {},
         error.UnsupportedPlatform => stderr_writer.print("Error: unsupported platform.\n", .{}) catch {},
+        error.NoSubject => stderr_writer.print("Error: no subject found to separate from the background.\n", .{}) catch {},
         error.OutOfMemory => stderr_writer.print("Error: out of memory.\n", .{}) catch {},
         else => stderr_writer.print("Error: unexpected error ({s})\n", .{@errorName(err)}) catch {},
     }

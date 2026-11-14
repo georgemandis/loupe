@@ -121,6 +121,7 @@ loupe saliency --objects img.jpg # objectness-based saliency
 loupe score photo.jpg          # aesthetic quality score (macOS 15+)
 loupe segment photo.jpg        # person segmentation mask
 loupe segment -o mask.png photo.jpg  # save mask as grayscale PNG
+loupe cutout -o subject.png photo.jpg # remove the background (macOS 14+)
 ```
 
 All commands support `--json` for machine-readable output.
@@ -145,6 +146,7 @@ All commands support `--json` for machine-readable output.
 | Saliency | Yes | - |
 | Aesthetic score | Yes (15+) | - |
 | Person segmentation | Yes | - |
+| Background removal | Yes (14+) | - |
 
 The macOS build uses the Vision framework. The Windows build uses WinRT (face detection and OCR). Commands not available on your platform are hidden from `--help`.
 

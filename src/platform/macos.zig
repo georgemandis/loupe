@@ -69,6 +69,21 @@ extern "c" fn CGImageDestinationAddImage(
 
 extern "c" fn CGImageDestinationFinalize(dest: *anyopaque) bool;
 
+extern "c" fn CGImageSourceCreateThumbnailAtIndex(
+    source: *anyopaque,
+    index: usize,
+    options: ?*anyopaque,
+) ?*anyopaque;
+extern "c" fn CGColorSpaceCreateWithName(name: *anyopaque) ?*anyopaque;
+extern "c" fn CGBitmapContextGetData(context: *anyopaque) ?[*]u8;
+extern "c" fn CVPixelBufferRelease(buffer: ?*anyopaque) void;
+
+extern "c" const kCGImageSourceCreateThumbnailWithTransform: *anyopaque;
+extern "c" const kCGImageSourceCreateThumbnailFromImageAlways: *anyopaque;
+extern "c" const kCGImageSourceThumbnailMaxPixelSize: *anyopaque;
+extern "c" const kCGColorSpaceSRGB: *anyopaque;
+extern "c" const kCFBooleanTrue: *anyopaque;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -129,6 +144,133 @@ pub fn loadImage(path: []const u8) vision.VisionError!ImageHandle {
     const image = CGImageSourceCreateImageAtIndex(source, 0, null) orelse return vision.VisionError.ImageLoadFailed;
 
     return image;
+}
+
+/// Load an image drawn the way it is meant to be seen: the orientation
+/// recorded in its metadata (EXIF, or the rotation stored in a HEIC) is
+/// applied to the pixels. `loadImage` returns the pixels as stored.
+pub fn loadImageOriented(path: []const u8) vision.VisionError!ImageHandle {
+    const url = cfURLFromPath(path) orelse return vision.VisionError.ImageLoadFailed;
+    defer CFRelease(url);
+
+    const source = CGImageSourceCreateWithURL(url, null) orelse return vision.VisionError.ImageLoadFailed;
+    defer CFRelease(source);
+
+    // Stored dimensions, to ask for a full-size result below.
+    const stored = CGImageSourceCreateImageAtIndex(source, 0, null) orelse return vision.VisionError.ImageLoadFailed;
+    const longest = @max(CGImageGetWidth(stored), CGImageGetHeight(stored));
+    CGImageRelease(stored);
+    if (longest == 0) return vision.VisionError.ImageLoadFailed;
+
+    // ImageIO applies orientation only on its thumbnail path, so request a
+    // "thumbnail" made from the full image at its full size.
+    const NSMutableDictionary = objc.getClass("NSMutableDictionary") orelse return vision.VisionError.ImageLoadFailed;
+    const NSNumber = objc.getClass("NSNumber") orelse return vision.VisionError.ImageLoadFailed;
+    const dict_alloc = objc.msgSend(objc.id, NSMutableDictionary, objc.sel("alloc"), .{});
+    const options = objc.msgSend(objc.id, dict_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, options, objc.sel("release"), .{});
+
+    const true_value: objc.id = @ptrCast(@alignCast(kCFBooleanTrue));
+    const number_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id = @ptrCast(&objc_msgSend);
+    const size_value = number_fn(@ptrCast(@alignCast(NSNumber)), objc.sel("numberWithUnsignedLong:"), longest);
+    const set = objc.sel("setObject:forKey:");
+    objc.msgSend(void, options, set, .{ true_value, @as(objc.id, @ptrCast(@alignCast(kCGImageSourceCreateThumbnailWithTransform))) });
+    objc.msgSend(void, options, set, .{ true_value, @as(objc.id, @ptrCast(@alignCast(kCGImageSourceCreateThumbnailFromImageAlways))) });
+    objc.msgSend(void, options, set, .{ size_value, @as(objc.id, @ptrCast(@alignCast(kCGImageSourceThumbnailMaxPixelSize))) });
+
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, @ptrCast(options)) orelse vision.VisionError.ImageLoadFailed;
+}
+
+/// Render the image to 8-bit sRGB RGBA with straight (not premultiplied)
+/// alpha. Row 0 is the top of the image. Caller frees `data`.
+pub fn getRgbaPixels(allocator: Allocator, image: ImageHandle) vision.VisionError!vision.RgbaPixels {
+    const width = CGImageGetWidth(image);
+    const height = CGImageGetHeight(image);
+    if (width == 0 or height == 0) return vision.VisionError.DetectionFailed;
+
+    const space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB) orelse return vision.VisionError.DetectionFailed;
+    defer CGColorSpaceRelease(space);
+
+    const data = allocator.alloc(u8, width * height * 4) catch return vision.VisionError.OutOfMemory;
+    errdefer allocator.free(data);
+    @memset(data, 0);
+
+    const ctx = CGBitmapContextCreate(@ptrCast(data.ptr), width, height, 8, width * 4, space, kCGImageAlphaPremultipliedLast) orelse return vision.VisionError.DetectionFailed;
+    defer CGContextRelease(ctx);
+
+    CGContextDrawImage(ctx, .{
+        .origin_x = 0,
+        .origin_y = 0,
+        .size_width = @floatFromInt(width),
+        .size_height = @floatFromInt(height),
+    }, image);
+
+    // CoreGraphics only draws premultiplied; undo that.
+    var i: usize = 0;
+    while (i < data.len) : (i += 4) {
+        const a: u32 = data[i + 3];
+        if (a == 255) continue;
+        if (a == 0) {
+            data[i] = 0;
+            data[i + 1] = 0;
+            data[i + 2] = 0;
+            continue;
+        }
+        inline for (0..3) |c| {
+            data[i + c] = @intCast(@min(255, (@as(u32, data[i + c]) * 255 + a / 2) / a));
+        }
+    }
+
+    return .{ .width = width, .height = height, .data = data };
+}
+
+/// Lift the foreground subjects (people, animals, objects) out of the image.
+/// Returns a new image of the same size whose background is transparent.
+/// Needs macOS 14; fails with `UnsupportedPlatform` before that and with
+/// `NoSubject` when nothing stands out from the background.
+pub fn removeBackground(image: ImageHandle) vision.VisionError!ImageHandle {
+    const RequestClass = objc.getClass("VNGenerateForegroundInstanceMaskRequest") orelse return vision.VisionError.UnsupportedPlatform;
+
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(@alignCast(image));
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    if (!perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr)) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(?objc.id, request, objc.sel("results"), .{}) orelse return vision.VisionError.NoSubject;
+    if (objc.nsArrayCount(results) == 0) return vision.VisionError.NoSubject;
+    const obs = objc.nsArrayObjectAtIndex(results, 0);
+
+    const instances = objc.msgSend(objc.id, obs, objc.sel("allInstances"), .{});
+    const instance_count = objc.msgSend(objc.NSUInteger, instances, objc.sel("count"), .{});
+    if (instance_count == 0) return vision.VisionError.NoSubject;
+
+    // The masked image comes back retained, at the source image's size.
+    const masked_fn: *const fn (objc.id, objc.SEL, objc.id, objc.id, bool, *?objc.id) callconv(.c) ?*anyopaque = @ptrCast(&objc_msgSend);
+    const pixel_buffer = masked_fn(obs, objc.sel("generateMaskedImageOfInstances:fromRequestHandler:croppedToInstancesExtent:error:"), instances, handler, false, &err_ptr) orelse return vision.VisionError.DetectionFailed;
+    defer CVPixelBufferRelease(pixel_buffer);
+
+    const CIImage = objc.getClass("CIImage") orelse return vision.VisionError.DetectionFailed;
+    const ci_image = objc.msgSend(?objc.id, CIImage, objc.sel("imageWithCVPixelBuffer:"), .{@as(objc.id, @ptrCast(@alignCast(pixel_buffer)))}) orelse return vision.VisionError.DetectionFailed;
+
+    const CIContext = objc.getClass("CIContext") orelse return vision.VisionError.DetectionFailed;
+    const ci_ctx = objc.msgSend(objc.id, CIContext, objc.sel("context"), .{});
+
+    return ciContextCreateCGImage(ci_ctx, ci_image, getCIImageExtent(ci_image)) orelse vision.VisionError.DetectionFailed;
 }
 
 pub fn freeImage(image: ImageHandle) void {

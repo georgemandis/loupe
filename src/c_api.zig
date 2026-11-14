@@ -60,6 +60,49 @@ export fn loupe_save_image(handle: *anyopaque, path: [*:0]const u8) i32 {
     return 0;
 }
 
+/// Flag for `loupe_load_image_ex`: apply the orientation stored in the
+/// file's metadata, so a phone photo comes back upright.
+pub const LOUPE_LOAD_APPLY_ORIENTATION: u32 = 1 << 0;
+
+export fn loupe_load_image_ex(path: [*:0]const u8, flags: u32) ?*anyopaque {
+    const path_slice = std.mem.sliceTo(path, 0);
+    if (flags & LOUPE_LOAD_APPLY_ORIENTATION != 0) {
+        return vision.loadImageOriented(path_slice) catch return null;
+    }
+    return vision.loadImage(path_slice) catch return null;
+}
+
+/// Render an image to 8-bit sRGB RGBA pixels (straight alpha, top row
+/// first, `width * height * 4` bytes). Free the result with `loupe_free`.
+export fn loupe_image_rgba(handle: *anyopaque, out_width: *u32, out_height: *u32) ?[*]u8 {
+    const px = vision.getRgbaPixels(allocator, handle) catch return null;
+    out_width.* = @intCast(px.width);
+    out_height.* = @intCast(px.height);
+    return px.data.ptr;
+}
+
+// --- Background removal ---
+
+pub const LOUPE_OK: i32 = 0;
+pub const LOUPE_ERR_FAILED: i32 = -1;
+pub const LOUPE_ERR_UNSUPPORTED: i32 = -2;
+pub const LOUPE_ERR_NO_SUBJECT: i32 = -3;
+
+/// Lift the foreground subjects out of an image. On success returns 0 and
+/// stores a new image (same size, transparent background) in `out_image`;
+/// free it with `loupe_free_image`. Returns LOUPE_ERR_NO_SUBJECT when
+/// nothing stands out from the background and LOUPE_ERR_UNSUPPORTED where
+/// the system cannot do this (before macOS 14, and on Windows).
+export fn loupe_remove_background(handle: *anyopaque, out_image: *?*anyopaque) i32 {
+    out_image.* = null;
+    out_image.* = vision.removeBackground(handle) catch |err| return switch (err) {
+        error.NoSubject => LOUPE_ERR_NO_SUBJECT,
+        error.UnsupportedPlatform => LOUPE_ERR_UNSUPPORTED,
+        else => LOUPE_ERR_FAILED,
+    };
+    return LOUPE_OK;
+}
+
 // --- Face detection ---
 
 export fn loupe_detect_faces(

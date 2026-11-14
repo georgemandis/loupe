@@ -160,6 +160,8 @@ pub const VisionError = error{
     SaveFailed,
     UnsupportedPlatform,
     OutOfMemory,
+    /// Background removal found nothing that stands out from the background.
+    NoSubject,
 };
 
 // ---------------------------------------------------------------------------
@@ -168,6 +170,30 @@ pub const VisionError = error{
 
 pub fn loadImage(path: []const u8) VisionError!ImageHandle {
     return platform.loadImage(path);
+}
+
+/// Like `loadImage`, with the orientation stored in the file's metadata
+/// applied to the pixels (a phone photo comes back upright).
+pub fn loadImageOriented(path: []const u8) VisionError!ImageHandle {
+    return platform.loadImageOriented(path);
+}
+
+/// 8-bit sRGB RGBA pixels with straight alpha, top row first.
+pub const RgbaPixels = struct {
+    width: usize,
+    height: usize,
+    data: []u8,
+};
+
+/// Render an image to raw RGBA pixels. Caller frees `data` with `allocator`.
+pub fn getRgbaPixels(allocator: Allocator, image: ImageHandle) VisionError!RgbaPixels {
+    return platform.getRgbaPixels(allocator, image);
+}
+
+/// Lift the foreground subjects out of the image, leaving the background
+/// transparent. Returns a new image; free it with `freeImage`. macOS 14+.
+pub fn removeBackground(image: ImageHandle) VisionError!ImageHandle {
+    return platform.removeBackground(image);
 }
 
 pub fn detectFaces(allocator: Allocator, image: ImageHandle) VisionError![]FaceResult {
