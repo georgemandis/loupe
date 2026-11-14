@@ -32,6 +32,16 @@ pub const OcrResult = struct {
     confidence: f64,
 };
 
+/// One recognized word, with its own box and the line it is on.
+pub const OcrWord = struct {
+    text: []const u8,
+    box: BoundingBox,
+    confidence: f64,
+    /// Index of the line of text this word belongs to, counting from 0 in
+    /// the order lines are recognized. Words of a line are in reading order.
+    line: u32,
+};
+
 pub const Symbology = enum {
     qr,
     ean13,
@@ -215,6 +225,18 @@ pub fn recognizeText(allocator: Allocator, image: ImageHandle) VisionError![]Ocr
 
 pub fn recognizeTextWithOptions(allocator: Allocator, image: ImageHandle, options: OcrOptions) VisionError![]OcrResult {
     return platform.recognizeText(allocator, image, options);
+}
+
+/// Recognize text word by word: one result per word, each with its own
+/// bounding box. Use it to act on part of a line (to cover one e-mail
+/// address, say). Free with `freeWords`. macOS only.
+pub fn recognizeWords(allocator: Allocator, image: ImageHandle, options: OcrOptions) VisionError![]OcrWord {
+    return platform.recognizeWords(allocator, image, options);
+}
+
+pub fn freeWords(allocator: Allocator, words: []OcrWord) void {
+    for (words) |w| allocator.free(w.text);
+    allocator.free(words);
 }
 
 pub fn scanBarcodes(allocator: Allocator, image: ImageHandle) VisionError![]BarcodeResult {

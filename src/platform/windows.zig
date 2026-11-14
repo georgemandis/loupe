@@ -978,6 +978,13 @@ pub fn saveMaskAsPng(seg: vision.SegmentResult, path: []const u8, source_image: 
     return vision.VisionError.UnsupportedPlatform;
 }
 
+pub fn recognizeWords(allocator: Allocator, image: ImageHandle, options: vision.OcrOptions) vision.VisionError![]vision.OcrWord {
+    _ = allocator;
+    _ = image;
+    _ = options;
+    return vision.VisionError.UnsupportedPlatform;
+}
+
 pub fn loadImageOriented(path: []const u8) vision.VisionError!ImageHandle {
     _ = path;
     return vision.VisionError.UnsupportedPlatform;

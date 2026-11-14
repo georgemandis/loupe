@@ -49,6 +49,7 @@ loupe faces --redact -o redacted.png photo.jpg # black-box faces
 loupe ocr screenshot.png
 loupe ocr --json screenshot.png
 loupe ocr --literal code-screenshot.png   # no dictionary correction: for code, ids, serials
+loupe ocr --words screenshot.png           # one line per word, with its box (macOS)
 ```
 
 ### Barcode & QR code scanning

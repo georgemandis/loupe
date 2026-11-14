@@ -346,6 +346,62 @@ export fn loupe_detect_aruco(
     return 0;
 }
 
+// --- OCR, word by word ---
+
+pub const LoupeOcrWord = extern struct {
+    text: ?[*:0]const u8,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    confidence: f64,
+    /// Index of the line this word is on; words of a line are in order.
+    line: u32,
+};
+
+/// Recognize text one word at a time, each with its own box (normalized,
+/// top-left origin). `flags` are the `LOUPE_OCR_*` flags. Free the result
+/// with `loupe_free_ocr_words`. Returns -1 on failure, including systems
+/// without support (Windows).
+export fn loupe_recognize_words(
+    handle: *anyopaque,
+    flags: u32,
+    out_words: *?[*]LoupeOcrWord,
+    out_count: *u32,
+) i32 {
+    out_words.* = null;
+    out_count.* = 0;
+    const options = vision.OcrOptions{
+        .language_correction = (flags & LOUPE_OCR_NO_LANGUAGE_CORRECTION) == 0,
+    };
+    const words = vision.recognizeWords(allocator, handle, options) catch return -1;
+    defer vision.freeWords(allocator, words);
+    if (words.len == 0) return 0;
+
+    const c_words = allocator.alloc(LoupeOcrWord, words.len) catch return -1;
+    for (words, 0..) |w, i| {
+        const c_text = allocator.allocSentinel(u8, w.text.len, 0) catch {
+            for (0..i) |j| {
+                if (c_words[j].text) |t| allocator.free(t[0..std.mem.len(t) :0]);
+            }
+            allocator.free(c_words);
+            return -1;
+        };
+        @memcpy(c_text[0..w.text.len], w.text);
+        c_words[i] = .{ .text = c_text, .x = w.box.x, .y = w.box.y, .width = w.box.width, .height = w.box.height, .confidence = w.confidence, .line = w.line };
+    }
+    out_words.* = c_words.ptr;
+    out_count.* = @intCast(words.len);
+    return 0;
+}
+
+export fn loupe_free_ocr_words(words: [*]LoupeOcrWord, count: u32) void {
+    for (0..count) |i| {
+        if (words[i].text) |t| std.c.free(@ptrCast(@constCast(t)));
+    }
+    std.c.free(@ptrCast(words));
+}
+
 // --- Memory management ---
 
 export fn loupe_free(ptr: ?*anyopaque) void {

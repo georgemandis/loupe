@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.5.0";
+const version = "0.6.0";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.Io.Writer) !void {
@@ -61,6 +61,8 @@ fn printUsage(writer: *std.Io.Writer) !void {
         \\Options for 'ocr':
         \\  --literal            Return characters exactly as read, with no
         \\                       dictionary correction (for code and identifiers)
+        \\  --words              One result per word, each with its own box
+        \\                       (line, x, y, width, height, text); macOS only
         \\
     , .{});
 
@@ -422,12 +424,15 @@ fn runOcr(
     var image_path: ?[]const u8 = null;
     var json_mode = false;
     var options = vision.OcrOptions{};
+    var by_word = false;
 
     var i: usize = 0;
     while (i < sub_args.len) : (i += 1) {
         const arg = sub_args[i];
         if (std.mem.eql(u8, arg, "--json")) {
             json_mode = true;
+        } else if (std.mem.eql(u8, arg, "--words")) {
+            by_word = true;
         } else if (std.mem.eql(u8, arg, "--literal")) {
             options.language_correction = false;
         } else if (std.mem.startsWith(u8, arg, "-")) {
@@ -440,7 +445,7 @@ fn runOcr(
     }
 
     const path = image_path orelse {
-        stderr_writer.print("Error: missing image path.\nUsage: loupe ocr [--json] [--literal] <image>\n", .{}) catch {};
+        stderr_writer.print("Error: missing image path.\nUsage: loupe ocr [--json] [--literal] [--words] <image>\n", .{}) catch {};
         stderr_writer.flush() catch {};
         std.process.exit(2);
     };
@@ -450,6 +455,30 @@ fn runOcr(
         return;
     };
     defer vision.freeImage(handle);
+
+    if (by_word) {
+        const words = vision.recognizeWords(allocator, handle, options) catch |err| {
+            handleError(err, json_mode, stdout_writer, stderr_writer);
+            return;
+        };
+        defer vision.freeWords(allocator, words);
+        if (json_mode) {
+            stdout_writer.print("{{\"words\":[", .{}) catch {};
+            for (words, 0..) |w, idx| {
+                if (idx > 0) stdout_writer.print(",", .{}) catch {};
+                stdout_writer.print("{{\"text\":\"", .{}) catch {};
+                writeJsonString(stdout_writer, w.text);
+                stdout_writer.print("\",\"line\":{d},\"box\":{{\"x\":{d:.4},\"y\":{d:.4},\"width\":{d:.4},\"height\":{d:.4}}}}}", .{ w.line, w.box.x, w.box.y, w.box.width, w.box.height }) catch {};
+            }
+            stdout_writer.print("]}}\n", .{}) catch {};
+        } else {
+            for (words) |w| {
+                stdout_writer.print("{d}\t{d:.4}\t{d:.4}\t{d:.4}\t{d:.4}\t{s}\n", .{ w.line, w.box.x, w.box.y, w.box.width, w.box.height, w.text }) catch {};
+            }
+        }
+        stdout_writer.flush() catch {};
+        std.process.exit(0);
+    }
 
     const results = vision.recognizeTextWithOptions(allocator, handle, options) catch |err| {
         handleError(err, json_mode, stdout_writer, stderr_writer);

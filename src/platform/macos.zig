@@ -597,6 +597,100 @@ pub fn recognizeText(allocator: Allocator, image: ImageHandle, options: vision.O
     return ocr_results;
 }
 
+const NSRange = extern struct { location: usize, length: usize };
+
+/// Like `recognizeText`, but one result per word, each with its own box and
+/// the index of the line it belongs to. A "word" is a run of characters
+/// between spaces in the recognized line.
+pub fn recognizeWords(allocator: Allocator, image: ImageHandle, options: vision.OcrOptions) vision.VisionError![]vision.OcrWord {
+    const NSDictionary = objc.getClass("NSDictionary") orelse return vision.VisionError.DetectionFailed;
+    const empty_dict = objc.msgSend(objc.id, NSDictionary, objc.sel("dictionary"), .{});
+
+    const HandlerClass = objc.getClass("VNImageRequestHandler") orelse return vision.VisionError.DetectionFailed;
+    const handler_alloc = objc.msgSend(objc.id, HandlerClass, objc.sel("alloc"), .{});
+    const image_as_id: objc.id = @ptrCast(@alignCast(image));
+    const handler = objc.msgSend(objc.id, handler_alloc, objc.sel("initWithCGImage:options:"), .{ image_as_id, empty_dict });
+    defer objc.msgSend(void, handler, objc.sel("release"), .{});
+
+    const RequestClass = objc.getClass("VNRecognizeTextRequest") orelse return vision.VisionError.DetectionFailed;
+    const request_alloc = objc.msgSend(objc.id, RequestClass, objc.sel("alloc"), .{});
+    const request = objc.msgSend(objc.id, request_alloc, objc.sel("init"), .{});
+    defer objc.msgSend(void, request, objc.sel("release"), .{});
+
+    const set_level_fn: *const fn (objc.id, objc.SEL, i64) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_level_fn(request, objc.sel("setRecognitionLevel:"), @as(i64, 0)); // accurate
+    const set_bool_fn: *const fn (objc.id, objc.SEL, bool) callconv(.c) void = @ptrCast(&objc_msgSend);
+    set_bool_fn(request, objc.sel("setUsesLanguageCorrection:"), options.language_correction);
+
+    const NSArray = objc.getClass("NSArray") orelse return vision.VisionError.DetectionFailed;
+    const requests_array = objc.msgSend(objc.id, NSArray, objc.sel("arrayWithObject:"), .{request});
+    var err_ptr: ?objc.id = null;
+    const perform_fn: *const fn (objc.id, objc.SEL, objc.id, *?objc.id) callconv(.c) bool = @ptrCast(&objc_msgSend);
+    if (!perform_fn(handler, objc.sel("performRequests:error:"), requests_array, &err_ptr)) return vision.VisionError.DetectionFailed;
+
+    const results = objc.msgSend(objc.id, request, objc.sel("results"), .{});
+    const count = objc.nsArrayCount(results);
+
+    var words: std.ArrayList(vision.OcrWord) = .empty;
+    errdefer {
+        for (words.items) |w| allocator.free(w.text);
+        words.deinit(allocator);
+    }
+
+    const top_candidates_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) objc.id = @ptrCast(&objc_msgSend);
+    const char_at_fn: *const fn (objc.id, objc.SEL, objc.NSUInteger) callconv(.c) u16 = @ptrCast(&objc_msgSend);
+    const substring_fn: *const fn (objc.id, objc.SEL, NSRange) callconv(.c) objc.id = @ptrCast(&objc_msgSend);
+    const box_for_range_fn: *const fn (objc.id, objc.SEL, NSRange, *?objc.id) callconv(.c) ?objc.id = @ptrCast(&objc_msgSend);
+
+    var line: u32 = 0;
+    for (0..count) |i| {
+        const observation = objc.nsArrayObjectAtIndex(results, i);
+        const candidates = top_candidates_fn(observation, objc.sel("topCandidates:"), @as(objc.NSUInteger, 1));
+        if (objc.nsArrayCount(candidates) == 0) continue;
+        const candidate = objc.nsArrayObjectAtIndex(candidates, 0);
+        const ns_str = objc.msgSend(objc.id, candidate, objc.sel("string"), .{});
+        const confidence = objc.msgSend(f32, candidate, objc.sel("confidence"), .{});
+        // NSString indexes UTF-16 units, and so does boundingBoxForRange:.
+        const length = objc.msgSend(objc.NSUInteger, ns_str, objc.sel("length"), .{});
+
+        var start: usize = 0;
+        var emitted = false;
+        while (start < length) {
+            while (start < length and char_at_fn(ns_str, objc.sel("characterAtIndex:"), start) == ' ') start += 1;
+            var end = start;
+            while (end < length and char_at_fn(ns_str, objc.sel("characterAtIndex:"), end) != ' ') end += 1;
+            if (end == start) break;
+            const range = NSRange{ .location = start, .length = end - start };
+            start = end;
+
+            var box_err: ?objc.id = null;
+            const rect_obs = box_for_range_fn(candidate, objc.sel("boundingBoxForRange:error:"), range, &box_err) orelse continue;
+            const bbox = getBoundingBox(rect_obs);
+
+            const sub = substring_fn(ns_str, objc.sel("substringWithRange:"), range);
+            const c_str = objc.fromNSString(sub) orelse continue;
+            const text = allocator.dupe(u8, std.mem.sliceTo(c_str, 0)) catch return vision.VisionError.OutOfMemory;
+            errdefer allocator.free(text);
+
+            words.append(allocator, .{
+                .text = text,
+                .box = .{
+                    .x = bbox.origin_x,
+                    .y = 1.0 - bbox.origin_y - bbox.size_height,
+                    .width = bbox.size_width,
+                    .height = bbox.size_height,
+                },
+                .confidence = @floatCast(confidence),
+                .line = line,
+            }) catch return vision.VisionError.OutOfMemory;
+            emitted = true;
+        }
+        if (emitted) line += 1;
+    }
+
+    return words.toOwnedSlice(allocator) catch return vision.VisionError.OutOfMemory;
+}
+
 fn mapSymbology(ns_symbology: objc.id) vision.Symbology {
     const cstr = objc.fromNSString(ns_symbology) orelse return .unknown;
     const s = std.mem.sliceTo(cstr, 0);
