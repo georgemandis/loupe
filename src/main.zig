@@ -94,10 +94,10 @@ fn printUsage(writer: *std.Io.Writer) !void {
 
 pub fn main(init: std.process.Init) !void {
     var stdout_buf: [4096]u8 = undefined;
-    var stdout = std.Io.File.stdout().writer(init.io, &stdout_buf);
+    var stdout = std.Io.File.stdout().writerStreaming(init.io, &stdout_buf);
 
     var stderr_buf: [4096]u8 = undefined;
-    var stderr = std.Io.File.stderr().writer(init.io, &stderr_buf);
+    var stderr = std.Io.File.stderr().writerStreaming(init.io, &stderr_buf);
 
     const allocator = init.gpa;
 
