@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const vision = @import("vision");
 
-const version = "0.6.0";
+const version = "0.6.1";
 const is_macos = builtin.os.tag == .macos;
 
 fn printUsage(writer: *std.Io.Writer) !void {
